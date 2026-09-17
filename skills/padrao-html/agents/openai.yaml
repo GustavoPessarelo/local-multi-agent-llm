@@ -1,0 +1,4 @@
+interface:
+  display_name: "Padrão HTML"
+  short_description: "Relatórios HTML laranja glass"
+  default_prompt: "Crie um relatório HTML responsivo em arquivo único usando o padrão laranja glass."

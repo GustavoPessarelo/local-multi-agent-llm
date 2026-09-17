@@ -1,0 +1,16 @@
+{
+  "id": "itau",
+  "displayName": "Itaú",
+  "version": "1.0.0",
+  "brand": {
+    "primary": "#EC7000",
+    "secondary": "#003399",
+    "background": "#F5F6FA",
+    "surface": "#FFFFFF",
+    "text": "#1D2533"
+  },
+  "logo": {
+    "source": "https://commons.wikimedia.org/wiki/File:Ita%C3%BA_Unibanco_logo_2023.svg",
+    "note": "Marca registrada. Use somente em materiais autorizados e substitua este asset se a organização fornecer o pacote oficial interno."
+  }
+}
