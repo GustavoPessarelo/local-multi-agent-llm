@@ -1,0 +1,110 @@
+<main class="shell">
+  <aside class="sidebar">
+    <div class="brand"><span class="brand-mark">◆</span><span>Local Agent<small>STUDIO</small></span></div>
+    <button class="primary new-chat" (click)="newConversation()" [disabled]="creatingConversation">{{ creatingConversation ? 'Criando…' : '＋ Nova conversa' }}</button>
+
+    <div class="side-section">
+      <div class="section-title"><span>PROJETOS</span><span>{{ projects.length }}</span></div>
+      <div class="project-list">
+        <div class="project-row" *ngFor="let item of projects; trackBy: trackId" [class.active]="item.id === project?.id"><button class="project-select" (click)="selectProject(item)"><span class="project-dot"></span>{{ item.name }}</button><button class="item-delete" (click)="confirmDeleteProject(item, $event)" title="Excluir projeto">×</button></div>
+      </div>
+      <form class="inline-form" (ngSubmit)="createProject()"><input [(ngModel)]="newProjectName" name="project" placeholder="Novo projeto"><button title="Criar projeto">＋</button></form>
+    </div>
+
+    <div class="side-section conversations-section">
+      <div class="section-title"><span>CONVERSAS</span><span>{{ conversations.length }}</span></div>
+      <div class="conversation-list">
+        <div class="conversation-row" *ngFor="let item of conversations; trackBy: trackId" [class.active]="item.id === conversation?.id"><button class="conversation-select" (click)="selectConversation(item); page = 'chat'"><span class="chat-icon">◌</span><span><b>{{ item.title }}</b><small>{{ item.updatedAt | date:'dd/MM HH:mm' }}</small></span></button><button class="item-delete" (click)="confirmDeleteConversation(item, $event)" title="Excluir conversa">×</button></div>
+        <div class="side-empty" *ngIf="!conversations.length">Nenhuma conversa</div>
+      </div>
+    </div>
+
+    <nav>
+      <button [class.active]="page === 'chat'" (click)="page = 'chat'"><span>◉</span> Chat</button>
+      <button [class.active]="page === 'flows'" (click)="page = 'flows'"><span>⌘</span> Flows</button>
+      <button [class.active]="page === 'config'" (click)="page = 'config'"><span>⚙</span> Configuração</button>
+    </nav>
+    <div class="local-status"><i></i><span>Inferência local</span><small>127.0.0.1</small></div>
+  </aside>
+
+  <section class="main chat-page" *ngIf="page === 'chat'">
+    <header class="topbar">
+      <div class="title-block"><small>{{ project?.name || 'Projeto local' }} / CONVERSA</small><input class="title-input" [(ngModel)]="editingConversationTitle" (keydown)="titleKeydown($event)" (blur)="renameConversation()" [disabled]="!conversation || busy" aria-label="Nome da conversa"></div>
+      <div class="top-actions"><span class="tool-count" *ngIf="enabledTools.length">{{ enabledTools.length }} tool(s)</span><select [(ngModel)]="model"><option *ngFor="let item of models" [value]="item">{{ item }}</option></select></div>
+    </header>
+    <div class="messages">
+      <article class="message" *ngFor="let message of messages" [class.user]="message.role === 'user'" [class.tool]="message.role === 'tool'">
+        <div class="avatar">{{ message.role === 'user' ? 'EU' : message.role === 'tool' ? 'T' : 'AI' }}</div>
+        <div class="bubble"><b>{{ message.role === 'user' ? 'Você' : message.role === 'tool' ? 'Tool local' : 'Agente' }}</b><pre>{{ message.content }}</pre></div>
+      </article>
+      <div class="empty hero" *ngIf="!messages.length"><span class="hero-mark">◆</span><h2>O que vamos construir?</h2><p>Converse com um modelo local ou execute um flow multiagente ligado a esta conversa.</p><div class="chips"><span>100% local</span><span>Memória de projeto</span><span>Tools aprovadas</span></div></div>
+    </div>
+    <div class="generation-status" *ngIf="generationStatus"><i></i>{{ generationStatus }}</div>
+    <form class="composer" (ngSubmit)="send()"><div class="composer-box"><textarea [(ngModel)]="input" name="input" placeholder="Envie uma mensagem…" [disabled]="busy || !conversation" (keydown)="onComposerKeydown($event)"></textarea><div class="composer-footer"><small>Enter envia · Shift+Enter quebra linha</small><button class="send" [disabled]="busy || !input.trim()">{{ busy ? '···' : '↑' }}</button></div></div></form>
+  </section>
+
+  <section class="main flows-page" *ngIf="page === 'flows'">
+    <header class="topbar"><div class="title-block"><small>ORQUESTRAÇÃO LOCAL</small><h1>{{ selectedFlow?.name || 'Flow Studio' }}</h1></div><div class="top-actions"><span class="version" *ngIf="selectedFlow">v{{ selectedFlow.activeVersion }}</span><button class="secondary" (click)="createBlankFlow()">＋ Em branco</button><button class="primary" (click)="saveFlow()" [disabled]="!selectedFlow || savingFlow">{{ savingFlow ? 'Salvando…' : 'Salvar versão' }}</button></div></header>
+    <div class="flow-layout">
+      <aside class="flow-library">
+        <div class="panel-title"><span>MEUS FLOWS</span><span>{{ flows.length }}</span></div>
+        <button class="flow-item" *ngFor="let item of flows; trackBy: trackId" [class.active]="item.id === selectedFlow?.id" (click)="selectFlow(item)"><b>{{ item.name }}</b><small>versão {{ item.activeVersion }}</small></button>
+        <div class="panel-title templates-title"><span>TEMPLATES</span></div>
+        <button class="template-card" *ngFor="let template of flowTemplates" (click)="createFlow(template)"><span>＋</span><div><b>{{ template.name }}</b><small>{{ template.description }}</small></div></button>
+      </aside>
+
+      <section class="flow-center" *ngIf="selectedFlow; else chooseTemplate">
+        <div class="flow-meta"><input [(ngModel)]="selectedFlow.name" aria-label="Nome do flow"><input [(ngModel)]="selectedFlow.description" aria-label="Descrição do flow"><div class="node-buttons"><button (click)="addNode('planner')">＋ Planejador</button><button (click)="addNode('executor')">＋ Executor</button><button (click)="addNode('reviewer')">＋ Revisor</button><button (click)="addNode('router')">＋ Roteador</button></div></div>
+        <div class="canvas-wrap">
+          <div class="canvas" (dragover)="onCanvasDragOver($event)" (drop)="onCanvasDrop($event)">
+            <svg class="edges"><defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z"></path></marker></defs><line *ngFor="let edge of graph.edges" [attr.x1]="edgeLine(edge).x1" [attr.y1]="edgeLine(edge).y1" [attr.x2]="edgeLine(edge).x2" [attr.y2]="edgeLine(edge).y2" marker-end="url(#arrow)"></line></svg>
+            <article class="agent-node" *ngFor="let node of graph.nodes" [class.selected]="node.id === selectedNode?.id" [class.running]="node.id === currentRun?.currentNode" [style.left.px]="node.x" [style.top.px]="node.y" draggable="true" (dragstart)="onNodeDragStart($event, node)" (click)="selectedNode = node">
+              <div class="node-head"><span class="node-icon">{{ node.type === 'planner' ? 'P' : node.type === 'executor' ? 'E' : node.type === 'reviewer' ? 'R' : '↗' }}</span><span><b>{{ node.name }}</b><small>{{ node.type }}</small></span><i [class.on]="node.id === currentRun?.currentNode"></i></div>
+              <p>{{ node.prompt || 'Configure o prompt no inspetor.' }}</p><footer><span>{{ node.tools.length }} tools</span><span>{{ node.memory.length }} memórias</span></footer>
+            </article>
+          </div>
+        </div>
+      </section>
+      <ng-template #chooseTemplate><section class="template-welcome"><span class="hero-mark">⌘</span><h2>Monte seu sistema multiagente</h2><p>Escolha um template à esquerda ou comece com um flow em branco.</p></section></ng-template>
+
+      <aside class="inspector" *ngIf="selectedFlow">
+        <div *ngIf="selectedNode as node">
+          <div class="panel-title"><span>AGENTE</span><button class="icon-danger" (click)="removeNode(node)">×</button></div>
+          <label>Nome<input [(ngModel)]="node.name"></label>
+          <label>Função<select [(ngModel)]="node.type"><option value="planner">Planejador</option><option value="executor">Executor</option><option value="reviewer">Revisor</option><option value="router">Roteador</option></select></label>
+          <label>Modelo<select [(ngModel)]="node.model"><option value="">Padrão do servidor</option><option *ngFor="let item of models" [value]="item">{{ item }}</option></select></label>
+          <label>Prompt<textarea [(ngModel)]="node.prompt" rows="5"></textarea></label>
+          <div class="check-group"><span>TOOLS</span><label *ngFor="let tool of tools"><input type="checkbox" [checked]="node.tools.includes(tool.name)" (change)="toggleNodeTool(tool.name)">{{ tool.displayName }}</label></div>
+          <div class="check-group"><span>MEMÓRIA</span><label><input type="checkbox" [checked]="node.memory.includes('short_term')" (change)="toggleNodeMemory('short_term')">Curta</label><label><input type="checkbox" [checked]="node.memory.includes('episodic')" (change)="toggleNodeMemory('episodic')">Episódica</label><label><input type="checkbox" [checked]="node.memory.includes('long_term')" (change)="toggleNodeMemory('long_term')">Longa</label><label><input type="checkbox" [checked]="node.memory.includes('project')" (change)="toggleNodeMemory('project')">Projeto</label></div>
+        </div>
+        <div class="edge-builder"><div class="panel-title"><span>CONEXÃO</span></div><select [(ngModel)]="edgeSource"><option value="">Origem</option><option *ngFor="let node of graph.nodes" [value]="node.id">{{ node.name }}</option></select><select [(ngModel)]="edgeTarget"><option value="">Destino</option><option *ngFor="let node of graph.nodes" [value]="node.id">{{ node.name }}</option></select><button class="secondary" (click)="addEdge()">Conectar →</button><button class="edge-pill" *ngFor="let edge of graph.edges" (click)="removeEdge(edge)">{{ edge.source }} → {{ edge.target }} ×</button></div>
+        <div class="run-panel"><div class="panel-title"><span>EXECUTAR</span><span class="status" *ngIf="currentRun" [attr.data-status]="currentRun.status">{{ currentRun.status }}</span></div><textarea [(ngModel)]="flowTask" rows="4" placeholder="Descreva a tarefa para o flow"></textarea><button class="primary" (click)="runFlow()" [disabled]="!flowTask.trim() || currentRun?.status === 'running'">▶ Executar flow</button><div class="trace" *ngIf="currentRun"><article *ngFor="let step of currentRun.trace"><i [attr.data-status]="step.status"></i><span><b>{{ step.name }}</b><small>{{ step.status }}</small></span></article><pre *ngIf="currentRun.output">{{ currentRun.output }}</pre></div></div>
+        <details class="versions"><summary>Histórico de versões ({{ flowVersions.length }})</summary><button *ngFor="let version of flowVersions" (click)="restoreVersion(version)">v{{ version.version }} · {{ version.createdAt | date:'dd/MM HH:mm' }}</button></details>
+      </aside>
+    </div>
+  </section>
+
+  <section class="main content-page" *ngIf="page === 'config' && configTab === 'memory'">
+    <header class="topbar"><div class="title-block"><small>CONFIGURAÇÃO</small><h1>Memória & busca semântica</h1></div><div class="config-tabs"><button class="active" (click)="configTab = 'memory'">Memória</button><button (click)="configTab = 'tools'">Tools</button><button (click)="configTab = 'resources'">Resources</button></div></header>
+    <div class="memory-layout">
+      <section class="memory-compose card"><h2>Guardar conhecimento</h2><p>Memórias locais podem ser habilitadas individualmente em cada agente.</p><select [(ngModel)]="memoryKind"><option value="project">Memória de projeto</option><option value="long_term">Long term</option><option value="episodic">Episódica</option></select><textarea [(ngModel)]="memoryContent" rows="7" placeholder="Decisão, preferência, fato ou contexto importante…"></textarea><button class="primary" (click)="addMemory()" [disabled]="memoryBusy || !memoryContent.trim()">Guardar memória</button></section>
+      <section class="memory-search card"><h2>Busca semântica local</h2><p>Usa embeddings locais quando disponíveis e fallback lexical determinístico.</p><div class="search-box"><input [(ngModel)]="memoryQuery" placeholder="O que você procura?" (keydown.enter)="searchMemory()"><button (click)="searchMemory()">⌕</button></div><div class="search-results"><article *ngFor="let result of searchResults"><div><span class="kind">{{ result.kind }}</span><small>{{ result.score | percent:'1.0-0' }}</small></div><b>{{ result.label }}</b><p>{{ result.content }}</p></article><div class="side-empty" *ngIf="memoryQuery && !searchResults.length && !memoryBusy">Nenhum resultado encontrado.</div></div></section>
+      <section class="memory-list"><article class="memory-card" *ngFor="let memory of memories; trackBy: trackId"><header><span class="kind">{{ memory.kind }}</span><button (click)="removeMemory(memory)">×</button></header><p>{{ memory.content }}</p><small>{{ memory.sourceType || 'manual' }} · {{ memory.createdAt | date:'dd/MM/yyyy HH:mm' }}</small></article></section>
+    </div>
+  </section>
+
+  <section class="main content-page" *ngIf="page === 'config' && configTab === 'resources'">
+    <header class="topbar"><div class="title-block"><small>CONFIGURAÇÃO · {{ project?.name }}</small><h1>Resources do projeto</h1></div><div class="config-head"><div class="config-tabs"><button (click)="configTab = 'memory'">Memória</button><button (click)="configTab = 'tools'">Tools</button><button class="active" (click)="configTab = 'resources'">Resources</button></div><label class="upload primary">＋ Enviar arquivo<input type="file" (change)="upload($event)"></label></div></header>
+    <div class="resource-grid"><article class="resource-card" *ngFor="let resource of resources; trackBy: trackId"><span class="file-icon">▤</span><div><b>{{ resource.name }}</b><small>{{ resource.sizeBytes }} bytes</small><pre>{{ resource.preview || 'Arquivo disponível para as tools locais.' }}</pre></div></article><div class="empty" *ngIf="!resources.length"><h2>Nenhum resource</h2><p>Envie CSV, JSON, Markdown ou texto para os agentes.</p></div></div>
+  </section>
+
+  <section class="main content-page" *ngIf="page === 'config' && configTab === 'tools'">
+    <header class="topbar"><div class="title-block"><small>CONFIGURAÇÃO · CATÁLOGO DETERMINÍSTICO</small><h1>Tools locais</h1></div><div class="config-tabs"><button (click)="configTab = 'memory'">Memória</button><button class="active" (click)="configTab = 'tools'">Tools</button><button (click)="configTab = 'resources'">Resources</button></div></header>
+    <div class="tool-layout"><section class="tool-grid"><article class="tool-card" *ngFor="let tool of tools" [class.active]="tool.name === selectedTool" (click)="selectedTool = tool.name"><header><span>⌁</span><label (click)="$event.stopPropagation()"><input type="checkbox" [checked]="enabledTools.includes(tool.name)" (change)="toggleAgentTool(tool.name)">Chat</label></header><b>{{ tool.displayName }}</b><p>{{ tool.description }}</p><small>v{{ tool.version }} · aprovação obrigatória</small></article></section><section class="tool-runner card"><h2>Execução manual</h2><p>Revise os argumentos antes de autorizar.</p><label>Tool<select [(ngModel)]="selectedTool"><option *ngFor="let tool of tools" [value]="tool.name">{{ tool.displayName }}</option></select></label><label>Resource<select [(ngModel)]="toolResourceId"><option [ngValue]="null">Selecione…</option><option *ngFor="let item of resources" [ngValue]="item.id">{{ item.name }}</option></select></label><label *ngIf="selectedTool === 'duckdb_query_csv'">Consulta SELECT<textarea [(ngModel)]="toolQuery"></textarea></label><button class="primary" (click)="requestTool()">Revisar execução</button></section></div>
+  </section>
+
+  <div class="toast error-toast" *ngIf="error"><span>{{ error }}</span><button (click)="error = ''">×</button></div>
+  <div class="toast notice-toast" *ngIf="notice"><span>{{ notice }}</span><button (click)="notice = ''">×</button></div>
+  <div class="approval" *ngIf="approval"><section><div class="approval-icon">!</div><small>APROVAÇÃO EXPLÍCITA</small><h2>Executar {{ approval.tool }}?</h2><p>A execução ficará registrada e limitada ao resource deste projeto.</p><pre>{{ approval.arguments | json }}</pre><footer><button class="secondary" (click)="declineTool()">Recusar</button><button class="primary" (click)="approveTool()">Aprovar e executar</button></footer></section></div>
+  <div class="approval" *ngIf="deleteTarget"><section class="delete-dialog"><div class="approval-icon danger-icon">×</div><small>EXCLUSÃO PERMANENTE</small><h2>Excluir {{ deleteTarget.type === 'project' ? 'projeto' : 'conversa' }}?</h2><p><b>{{ deleteTarget.name }}</b></p><p *ngIf="deleteTarget.type === 'project'">Conversas, flows, memórias e arquivos locais deste projeto também serão removidos.</p><footer><button class="secondary" (click)="cancelDelete()">Cancelar</button><button class="danger-button" (click)="executeDelete()">Excluir definitivamente</button></footer></section></div>
+</main>

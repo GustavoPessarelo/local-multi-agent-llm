@@ -1,0 +1,26 @@
+from django.urls import path
+from . import views
+
+urlpatterns = [
+    path("health", views.health),
+    path("models", views.models),
+    path("projects", views.projects),
+    path("projects/<int:project_id>", views.project_detail),
+    path("projects/<int:project_id>/conversations", views.conversations),
+    path("conversations/<int:conversation_id>", views.conversation_detail),
+    path("conversations/<int:conversation_id>/messages", views.messages),
+    path("projects/<int:project_id>/resources", views.resources),
+    path("tools", views.tools),
+    path("projects/<int:project_id>/tools/invocations", views.tool_invocations),
+    path("tool-invocations/<int:invocation_id>/approve", views.approve_tool),
+    path("tool-invocations/<int:invocation_id>/decline", views.decline_tool),
+    path("flow-templates", views.flow_templates),
+    path("projects/<int:project_id>/flows", views.flows),
+    path("flows/<int:flow_id>", views.flow_detail),
+    path("flows/<int:flow_id>/versions", views.flow_versions),
+    path("flows/<int:flow_id>/runs", views.flow_runs),
+    path("flow-runs/<int:run_id>", views.flow_run_detail),
+    path("projects/<int:project_id>/memories", views.memories),
+    path("memories/<int:memory_id>", views.memory_detail),
+    path("projects/<int:project_id>/search", views.semantic_search),
+]

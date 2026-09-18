@@ -1,0 +1,23 @@
+# Dados e credenciais locais
+.env
+.env.local
+.indev/
+.venv/
+
+# Dependências e artefatos de execução
+app/node_modules/
+app/.next/
+app/dist/
+app/.wrangler/
+app/.vinext/
+__pycache__/
+*.py[cod]
+
+# Runtime isolado da plataforma v2
+v2/.venv/
+v2/frontend/node_modules/
+v2/frontend/dist/
+v2/backend/db.sqlite3
+v2/data/
+v2/.logs/
+v2/.env

@@ -2,7 +2,28 @@
 
 Espaço para transformar a ideia do InDev em um produto claro, útil e construível.
 
-## Como usar esta branch — OpenAI/Codex
+## Execução atual — modelos locais
+
+Esta cópia inicia somente a interface local e usa um servidor de modelos compatível com a API OpenAI em `localhost`. O ambiente validado usa `http://localhost:1234/v1` e o modelo `google/gemma-3-4b`.
+
+Pré-requisitos:
+
+- Node.js 22.13 ou superior, com npm.
+- Um servidor local de modelos ativo e com ao menos um modelo carregado.
+
+Dentro de `app`:
+
+```bash
+npm ci
+npm run doctor
+npm run dev
+```
+
+Abra `http://localhost:3001`. O InDev consulta o catálogo local em `/v1/models` e conversa por `/v1/chat/completions`, com streaming. Não requer chave da OpenAI nem inicia o Codex App Server.
+
+Copie `app/.env.example` para `app/.env.local` apenas se a porta, URL ou modelo padrão forem diferentes.
+
+## Histórico — implementação anterior OpenAI/Codex
 
 Esta é a branch principal do InDev. Ela executa o Codex App Server incluído no próprio repositório e usa a OpenAI como provedora de LLM. Não é necessário instalar o Codex Desktop nem um comando `codex` global.
 

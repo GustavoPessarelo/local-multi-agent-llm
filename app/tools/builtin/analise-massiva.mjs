@@ -1,10 +1,9 @@
 import { mkdir, realpath, stat } from "node:fs/promises";
 import { basename, extname, isAbsolute, join, relative, resolve } from "node:path";
 import ExcelJS from "exceljs";
-import OpenAI from "openai";
 
 export const MAX_MASSIVA_ROWS = 8_000;
-export const DEFAULT_MASSIVA_MODEL = "gpt-5.6-luna";
+export const DEFAULT_MASSIVA_MODEL = "google/gemma-3-4b";
 const DEFAULT_CONCURRENCY = 4;
 const MAX_CONCURRENCY = 10;
 const MAX_WORKBOOK_BYTES = 100 * 1024 * 1024;
@@ -23,7 +22,7 @@ export const tool = {
         coluna_texto: { type: "string", description: "Cabeçalho da coluna que contém o texto a analisar." },
         colunas_saida: { type: "array", minItems: 1, maxItems: 12, items: { type: "string" }, description: "Cabeçalhos das colunas que o modelo deve preencher." },
         contexto: { type: "string", minLength: 3, description: "Critério, política ou instrução usada para analisar cada linha." },
-        modelo: { type: "string", description: "Modelo OpenAI para cada linha. O padrão econômico é gpt-5.6-luna." },
+        modelo: { type: "string", description: "Modelo local para cada linha. O padrão é google/gemma-3-4b." },
         limite: { type: "integer", minimum: 0, maximum: 8000, description: "Quantidade máxima de linhas. Zero ou ausência significa todas, até 8.000." },
         concorrencia: { type: "integer", minimum: 1, maximum: 10, description: "Chamadas simultâneas. Padrão 4; máximo 10." },
       },
@@ -155,7 +154,7 @@ async function inspectWorkbook(args, context) {
     totalRows: candidateRows.length,
     outputColumns,
     criteria,
-    model: cleanString(args.modelo) || process.env.OPENAI_MASSIVA_MODEL || DEFAULT_MASSIVA_MODEL,
+    model: cleanString(args.modelo) || process.env.INDEV_MASSIVA_MODEL || process.env.INDEV_DEFAULT_MODEL || DEFAULT_MASSIVA_MODEL,
     concurrency: integerInRange(args.concorrencia, DEFAULT_CONCURRENCY, 1, MAX_CONCURRENCY),
   };
 }
@@ -170,8 +169,8 @@ export async function createMassivaPlan(args, context) {
       `Arquivo: ${basename(inspected.candidate)}`,
       `Coluna de entrada: ${cleanString(args.coluna_texto)}`,
       `Colunas de saída: ${inspected.outputColumns.join(", ")}`,
-      `Dados enviados: conteúdo da coluna '${cleanString(args.coluna_texto)}' para a API da OpenAI`,
-      `Custo: aproximadamente ${inspected.selectedRows.length} chamadas de modelo`,
+      `Dados enviados: conteúdo da coluna '${cleanString(args.coluna_texto)}' para o modelo local`,
+      `Processamento: aproximadamente ${inspected.selectedRows.length} chamadas locais de modelo`,
       `Paralelismo: ${inspected.concurrency} por vez`,
     ],
   };
@@ -201,31 +200,52 @@ async function withRetries(operation, attempts = 3) {
   throw lastError;
 }
 
-function createOpenAIClassifier({ apiKey, model, outputColumns, criteria }) {
-  const client = new OpenAI({ apiKey, timeout: 120_000, maxRetries: 0 });
+function localModelUrl() {
+  const raw = String(process.env.INDEV_LOCAL_BASE_URL || "http://127.0.0.1:1234/v1").replace(/\/+$/, "");
+  const url = new URL(raw);
+  if (!["localhost", "127.0.0.1", "::1"].includes(url.hostname)) throw new Error("A análise massiva aceita somente um servidor de modelos em localhost.");
+  return url.toString().replace(/\/$/, "");
+}
+
+function parseModelJson(content) {
+  const source = String(content || "").trim().replace(/^```json\s*/i, "").replace(/\s*```$/, "");
+  const start = source.indexOf("{");
+  const end = source.lastIndexOf("}");
+  if (start < 0 || end < start) throw new Error("O modelo local não retornou JSON estruturado.");
+  return JSON.parse(source.slice(start, end + 1));
+}
+
+function createLocalClassifier({ model, outputColumns, criteria }) {
   const schema = structuredOutputSchema(outputColumns);
   return async ({ text }) => {
-    const response = await withRetries(() => client.responses.create({
-      model,
-      store: false,
-      reasoning: { effort: "low" },
-      max_output_tokens: 1_200,
-      instructions: `Você é um classificador de dados preciso. Aplique o critério abaixo ao registro recebido. Não invente fatos. Preencha exatamente as colunas pedidas. Critério:\n${criteria}`,
-      input: text,
-      text: {
-        verbosity: "low",
-        format: {
-          type: "json_schema",
-          name: "resultado_analise_massiva",
-          strict: true,
-          schema,
-        },
-      },
-    }));
-    const parsed = JSON.parse(response.output_text || "{}");
+    const response = await withRetries(async () => {
+      const result = await fetch(`${localModelUrl()}/chat/completions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model,
+          temperature: 0,
+          response_format: {
+            type: "json_schema",
+            json_schema: { name: "resultado_analise_massiva", strict: true, schema },
+          },
+          messages: [
+            { role: "system", content: `Você é um classificador de dados preciso. Aplique o critério abaixo ao registro recebido. Não invente fatos. Responda somente com um objeto JSON válido. Critério:\n${criteria}\nSchema JSON esperado:\n${JSON.stringify(schema)}` },
+            { role: "user", content: text },
+          ],
+        }),
+      });
+      if (!result.ok) {
+        const error = new Error(`O modelo local respondeu ${result.status}: ${(await result.text()).slice(0, 300)}`);
+        error.status = result.status;
+        throw error;
+      }
+      return result.json();
+    });
+    const parsed = parseModelJson(response.choices?.[0]?.message?.content);
     return {
       values: Object.fromEntries(outputColumns.map((column) => [column, String(parsed[column] ?? "")])),
-      usage: response.usage || null,
+      usage: response.usage ? { input_tokens: response.usage.prompt_tokens || 0, output_tokens: response.usage.completion_tokens || 0 } : null,
     };
   };
 }
@@ -254,14 +274,11 @@ async function classifyInParallel(rows, concurrency, classifier, onProgress) {
 
 export async function executeMassiva(args, context, dependencies = {}) {
   const inspected = await inspectWorkbook(args, context);
-  const apiKey = process.env.OPENAI_API_KEY;
-  const classifier = dependencies.classifier || (apiKey ? createOpenAIClassifier({
-    apiKey,
+  const classifier = dependencies.classifier || createLocalClassifier({
     model: inspected.model,
     outputColumns: inspected.outputColumns,
     criteria: inspected.criteria,
-  }) : null);
-  if (!classifier) throw new Error("Configure OPENAI_API_KEY em app/.env.local para executar a análise massiva.");
+  });
 
   const results = await classifyInParallel(inspected.selectedRows, inspected.concurrency, classifier, context.onProgress);
   const outputIndexes = resolveOutputColumnIndexes(inspected.worksheet, inspected.headerRowNumber, inspected.headers, inspected.outputColumns);

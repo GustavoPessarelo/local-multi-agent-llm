@@ -14,23 +14,19 @@
     "build": "vinext build",
     "start": "vinext start",
     "test": "npm run build && node --import tsx --test tests/*.test.mjs tests/*.test.ts",
-    "test:e2e": "node scripts/indev-setup.mjs --non-interactive && node tests/codex-app-server.smoke.mjs",
+    "test:e2e": "node scripts/indev-setup.mjs --non-interactive && node --import tsx --test tests/indev-ui.test.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate"
   },
   "dependencies": {
-    "@openai/codex": "0.150.0",
     "ajv": "^8.20.0",
     "drizzle-orm": "0.45.2",
     "exceljs": "^4.4.0",
     "markdown-it": "^15.0.0",
-    "openai": "^7.6.0",
     "react": "19.2.6",
     "react-dom": "19.2.6",
     "react-loading-skeleton": "3.5.0",
-    "read-excel-file": "9.3.10",
-    "undici": "^8.10.0",
-    "ws": "^8.21.3"
+    "read-excel-file": "9.3.10"
   },
   "overrides": {
     "exceljs": {
@@ -45,7 +41,6 @@
     "@types/node": "22.19.19",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
-    "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "6.0.2",
     "@vitejs/plugin-rsc": "0.5.26",
     "drizzle-kit": "0.31.10",

@@ -4,37 +4,35 @@ import test from "node:test";
 
 const root = new URL("../", import.meta.url);
 
-test("o visual usa o Codex App Server e mantém a Responses API como reserva", async () => {
-  const [page, client, fallbackRoute, envExample] = await Promise.all([
+test("o visual usa o provedor de modelos local compatível com OpenAI", async () => {
+  const [page, provider, messageRoute, envExample] = await Promise.all([
     readFile(new URL("app/page.tsx", root), "utf8"),
-    readFile(new URL("lib/codex-app-client.ts", root), "utf8"),
+    readFile(new URL("lib/local-model.ts", root), "utf8"),
     readFile(new URL("app/api/threads/[threadId]/messages/route.ts", root), "utf8"),
     readFile(new URL(".env.example", root), "utf8"),
   ]);
 
-  assert.match(client, /ws:\/\/127\.0\.0\.1:4502/);
-  assert.match(client, /"initialize"/);
-  assert.match(page, /"thread\/start"/);
-  assert.match(page, /"turn\/start"/);
-  assert.match(page, /item\/agentMessage\/delta/);
-  assert.match(page, /requestApproval/);
-  assert.match(page, /startResponsesFallback/);
-  assert.match(page, /DEFAULT_CHAT_MODEL = "gpt-5\.6-luna"/);
-  assert.match(page, /createCodexThread\(client, preferredModel, availableTools\)/);
-  assert.match(fallbackRoute, /process\.env\.OPENAI_MODEL \|\| "gpt-5\.6-luna"/);
-  assert.match(envExample, /OPENAI_MODEL=gpt-5\.6-luna/);
+  assert.match(page, /startLocalThread/);
+  assert.match(page, /Modelo local está pensando/);
+  assert.match(messageRoute, /text\/event-stream/);
+  assert.match(provider, /INDEV_LOCAL_BASE_URL/);
+  assert.match(provider, /chat\/completions/);
+  assert.match(provider, /localhost/);
+  assert.match(messageRoute, /localChatStream/);
+  assert.match(messageRoute, /completionEvents/);
+  assert.doesNotMatch(messageRoute, /OPENAI_API_KEY|new OpenAI/);
+  assert.match(envExample, /INDEV_DEFAULT_MODEL=google\/gemma-3-4b/);
 });
 
-test("arquivos, skills, sandbox, terminal e comandos estão ligados ao protocolo", async () => {
-  const [page, bridge] = await Promise.all([
+test("arquivos, sandbox e tools locais mantêm suas proteções de execução", async () => {
+  const [page, registry] = await Promise.all([
     readFile(new URL("app/page.tsx", root), "utf8"),
-    readFile(new URL("scripts/codex-bridge.mjs", root), "utf8"),
+    readFile(new URL("tools/registry.mjs", root), "utf8"),
   ]);
 
   for (const capability of [
     "fs/writeFile",
     "fs/readDirectory",
-    "skills/list",
     "thread/compact/start",
     "turn/interrupt",
     "item/commandExecution/outputDelta",
@@ -46,9 +44,9 @@ test("arquivos, skills, sandbox, terminal e comandos estão ligados ao protocolo
   assert.match(page, /Aguardando sua aprovação de custo/);
   assert.match(page, /Autorizar e executar/);
   assert.match(page, /approval\.preview\.approvalToken/);
-  assert.match(bridge, /tools\/catalog/);
-  assert.match(bridge, /executeTool/);
-  assert.match(bridge, /consumeToolApproval/);
+  assert.match(registry, /toolCatalog/);
+  assert.match(registry, /executeTool/);
+  assert.match(registry, /toolRequiresApproval/);
 });
 
 test("Excel é extraído e enviado como contexto legível", async () => {
@@ -98,7 +96,7 @@ test("resultados locais viram prévia e download dentro do InDev", async () => {
   assert.match(artifacts, /isPathInsideWorkspace/);
 });
 
-test("o comando padrão inicia a interface local e o App Server incluído no projeto", async () => {
+test("o comando padrão inicia a interface local", async () => {
   const [packageJson, launcher, runtime] = await Promise.all([
     readFile(new URL("package.json", root), "utf8"),
     readFile(new URL("scripts/indev-dev.mjs", root), "utf8"),
@@ -106,12 +104,7 @@ test("o comando padrão inicia a interface local e o App Server incluído no pro
   ]);
 
   assert.match(packageJson, /"dev": "node scripts\/indev-dev\.mjs"/);
-  assert.match(packageJson, /"@openai\/codex": "0\.150\.0"/);
-  assert.match(launcher, /codexEntrypoint/);
-  assert.match(launcher, /app-server/);
-  assert.match(launcher, /codex-bridge/);
   assert.match(launcher, /vinextEntrypoint/);
-  assert.match(runtime, /node_modules.*@openai.*codex/s);
-  assert.match(runtime, /CODEX_HOME/);
-  assert.doesNotMatch(launcher, /spawn\("codex"/);
+  assert.doesNotMatch(launcher, /app-server|codex-bridge|codexEntrypoint/);
+  assert.match(runtime, /INDEV_LOCAL_BASE_URL/);
 });
