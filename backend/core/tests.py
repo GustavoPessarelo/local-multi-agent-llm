@@ -12,6 +12,7 @@ from django.core.management import call_command
 from .local_llm import base_url
 from .models import ChatRun, Flow, FlowRun, FlowVersion, MemoryEntry, Message, Project, Resource, ToolDefinition, ToolInvocation
 from .orchestration import FLOW_TEMPLATES, execute_flow, validate_graph
+from .management.commands.seed_demo_flow import non_linear_routing_graph
 from .runtime import execute_chat_run, request_cancel
 from .tools import ensure_builtin_tools, execute
 
@@ -43,13 +44,13 @@ class ToolExecutionTests(TestCase):
 
 
 class ApiWorkflowTests(TestCase):
-    def test_demo_seed_creates_three_idempotent_flows(self):
+    def test_demo_seed_creates_four_idempotent_flows(self):
         call_command("seed_demo_flow", verbosity=0)
         call_command("seed_demo_flow", verbosity=0)
         project = Project.objects.get(name="Exemplo multiagente")
-        self.assertEqual(project.flows.count(), 3)
-        self.assertEqual(FlowVersion.objects.filter(flow__project=project).count(), 3)
-        self.assertEqual(project.conversations.count(), 3)
+        self.assertEqual(project.flows.count(), 4)
+        self.assertEqual(FlowVersion.objects.filter(flow__project=project).count(), 4)
+        self.assertEqual(project.conversations.count(), 4)
 
     def test_agent_graph_requires_root_and_rejects_cycle(self):
         graph = {"rootId": "a", "nodes": [{"id": "a", "name": "A", "systemPrompt": "A", "x": 0, "y": 0}, {"id": "b", "name": "B", "systemPrompt": "B", "x": 1, "y": 1}], "edges": [{"id": "1", "source": "a", "target": "b"}]}
@@ -103,6 +104,27 @@ class ApiWorkflowTests(TestCase):
         self.assertEqual([item["name"] for item in assistant.metadata["traceAgents"]], ["Planejador", "Executor", "Revisor"])
         self.assertEqual(len([item for item in run.events if item["type"] == "delegated"]), 2)
         self.assertEqual(len([item for item in run.events if item["type"] == "agent_completed"]), 3)
+
+    def test_non_linear_demo_routes_only_to_the_selected_specialist(self):
+        project = Project.objects.create(name="Projeto")
+        conversation = project.conversations.create(title="Roteamento")
+        user_message = Message.objects.create(conversation=conversation, role="user", content="Analise este CSV de vendas")
+        flow = Flow.objects.create(project=project, name="Triagem", active_version=1)
+        version = FlowVersion.objects.create(flow=flow, version=1, graph=non_linear_routing_graph())
+        run = ChatRun.objects.create(conversation=conversation, user_message=user_message, flow_version=version, model="local")
+        responses = [
+            iter(["DELEGATE data\nTASK: Rota escolhida: data. Motivo operacional: a solicitação pede análise de CSV. Analise este CSV de vendas."]),
+            iter(["DELEGATE reviewer\nTASK: A análise indica crescimento de vendas."]),
+            iter(["FINAL\nA análise indica crescimento de vendas."]),
+        ]
+        with patch("core.runtime.stream_chat", side_effect=responses):
+            with patch("core.runtime.memory_context", return_value=""):
+                execute_chat_run(run.id)
+        run.refresh_from_db()
+        events = [item for item in run.events if item["type"] == "agent_started"]
+        self.assertEqual([item["agentId"] for item in events], ["triage", "data", "reviewer"])
+        self.assertNotIn("code", [item["agentId"] for item in events])
+        self.assertNotIn("writing", [item["agentId"] for item in events])
 
     def test_profiling_writes_local_json_log(self):
         project = Project.objects.create(name="Projeto")

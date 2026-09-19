@@ -203,7 +203,12 @@ python backend\manage.py migrate
 python backend\manage.py seed_demo_flow
 ```
 
-O comando cria o projeto **Exemplo multiagente** com três flows:
+O comando cria o projeto **Exemplo multiagente** com quatro flows, incluindo
+**Triagem inteligente — Roteamento não linear**. Nele, o agente **Triagem**
+decide entre as rotas **Código**, **Dados** e **Comunicação**; somente o
+especialista escolhido é executado e, em seguida, a resposta passa pelo
+**Revisor final**. A decisão e a rota escolhida aparecem em
+**Rastreabilidade**.
 
 1. **Planejar, redigir e revisar** — Planejador → Redator → Revisor;
 2. **Laboratório de código** — Arquiteto → Desenvolvedor → QA;

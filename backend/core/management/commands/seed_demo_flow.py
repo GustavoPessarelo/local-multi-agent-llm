@@ -55,10 +55,48 @@ def critical_council_graph() -> dict:
     })
 
 
+def non_linear_routing_graph() -> dict:
+    """Um exemplo que toma uma decisão no primeiro agente e converge no revisor."""
+    return validate_graph({
+        "rootId": "triage",
+        "nodes": [
+            {
+                "id": "triage", "name": "Triagem", "x": 70, "y": 250,
+                "systemPrompt": "Você é o roteador inicial. Classifique a solicitação em UMA rota: `code` para programação, APIs, bugs ou arquitetura; `data` para CSV, planilhas, SQL, métricas ou análise; `writing` para e-mails, textos, resumos ou comunicação. Não resolva a solicitação. Escolha exatamente uma rota e responda obrigatoriamente com `DELEGATE <id>` na primeira linha. Na segunda linha escreva `TASK:` seguido de `Rota escolhida: <id>. Motivo operacional: <uma frase curta>.` e preserve a solicitação.",
+            },
+            {
+                "id": "code", "name": "Especialista em código", "x": 390, "y": 50,
+                "systemPrompt": "Resolva pedidos de programação com uma solução executável, explique decisões técnicas e destaque limites. Ao terminar, delegue obrigatoriamente ao Revisor: primeira linha `DELEGATE reviewer`; segunda linha `TASK:` com sua solução completa.",
+            },
+            {
+                "id": "data", "name": "Especialista em dados", "x": 390, "y": 250,
+                "systemPrompt": "Resolva pedidos de análise de dados, CSV, planilhas, SQL e métricas. Seja explícito sobre dados ausentes e use tools somente quando disponíveis. Ao terminar, delegue obrigatoriamente ao Revisor: primeira linha `DELEGATE reviewer`; segunda linha `TASK:` com sua análise completa.",
+            },
+            {
+                "id": "writing", "name": "Especialista em comunicação", "x": 390, "y": 450,
+                "systemPrompt": "Resolva pedidos de redação, e-mails, resumos e comunicação, adequando tom e público. Ao terminar, delegue obrigatoriamente ao Revisor: primeira linha `DELEGATE reviewer`; segunda linha `TASK:` com seu texto completo.",
+            },
+            {
+                "id": "reviewer", "name": "Revisor final", "x": 750, "y": 250,
+                "systemPrompt": "Valide se a entrega atende à solicitação, corrija erros e entregue uma resposta final clara em português. Comece com `FINAL` e não exponha o protocolo de delegação.",
+            },
+        ],
+        "edges": [
+            {"id": "triage-code", "source": "triage", "target": "code"},
+            {"id": "triage-data", "source": "triage", "target": "data"},
+            {"id": "triage-writing", "source": "triage", "target": "writing"},
+            {"id": "code-reviewer", "source": "code", "target": "reviewer"},
+            {"id": "data-reviewer", "source": "data", "target": "reviewer"},
+            {"id": "writing-reviewer", "source": "writing", "target": "reviewer"},
+        ],
+    })
+
+
 DEMOS = [
     {"name": "Demonstração — Planejar, redigir e revisar", "description": "Planejador → Redator → Revisor, para textos e explicações revisadas.", "conversation": "Teste: redação revisada", "graph": reviewed_writing_graph},
     {"name": "Laboratório de código — Arquitetura, implementação e QA", "description": "Arquiteto → Desenvolvedor → QA, para produzir e revisar código.", "conversation": "Teste: laboratório de código", "graph": code_lab_graph},
     {"name": "Conselho crítico — Análise, crítica e síntese", "description": "Analista → Crítico → Sintetizador, para decisões e comparações com trade-offs.", "conversation": "Teste: conselho crítico", "graph": critical_council_graph},
+    {"name": "Triagem inteligente — Roteamento não linear", "description": "Triagem decide entre Código, Dados ou Comunicação; a rota escolhida converge no Revisor final.", "conversation": "Teste: roteamento não linear", "graph": non_linear_routing_graph},
 ]
 
 
