@@ -70,6 +70,7 @@ def serialize_chat_run(run: ChatRun, after: int = 0) -> dict:
         "id": run.id,
         "conversationId": run.conversation_id,
         "flowId": run.flow_version.flow_id if run.flow_version_id else None,
+        "flowName": run.flow_version.flow.name if run.flow_version_id else None,
         "flowVersion": run.flow_version.version if run.flow_version_id else None,
         "model": run.model,
         "status": run.status,
@@ -80,6 +81,9 @@ def serialize_chat_run(run: ChatRun, after: int = 0) -> dict:
         "error": run.error,
         "profilingEnabled": run.profiling_enabled,
         "profilingFile": run.profiling_file,
+        "startedAt": run.started_at.isoformat() if run.started_at else None,
+        "completedAt": run.completed_at.isoformat() if run.completed_at else None,
+        "durationMs": round((run.completed_at - run.started_at).total_seconds() * 1000) if run.started_at and run.completed_at else None,
         "pendingApproval": {"id": pending.id, "tool": pending.tool.name, "arguments": pending.arguments} if pending else None,
         "createdAt": run.created_at.isoformat(),
     }
@@ -391,7 +395,10 @@ def approve_tool(request, invocation_id: int):
             if not chat_run.cancel_requested:
                 chat_run.status = "queued"
                 chat_run.save(update_fields=["status"])
-                append_event(chat_run, "tool_completed", invocationId=invocation.id, tool=invocation.tool.name)
+                append_event(
+                    chat_run, "tool_completed", invocationId=invocation.id, tool=invocation.tool.name,
+                    resultPreview=json.dumps(result, ensure_ascii=False)[:12_000],
+                )
         return JsonResponse({"invocation": {"id": invocation.id, "status": invocation.status, "result": result}, "assistant": serialize_message(assistant) if assistant else None, "flowRunId": invocation.flow_run_id, "chatRunId": invocation.chat_run_id})
     except ToolCancelledError as error:
         invocation.status = "cancelled"

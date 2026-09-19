@@ -35,10 +35,10 @@
       </div>
     </header>
     <div class="messages">
-      <article class="message" *ngFor="let message of messages" [class.user]="message.role==='user'" [class.tool]="message.role==='tool'"><div class="avatar">{{ message.role==='user' ? 'EU' : message.role==='tool' ? 'T' : 'AI' }}</div><div class="bubble"><b>{{ message.role==='user' ? 'Você' : message.role==='tool' ? 'Tool local' : 'Agente' }}</b><pre>{{ message.content }}</pre></div></article>
+      <article class="message" *ngFor="let message of messages" [class.user]="message.role==='user'" [class.tool]="message.role==='tool'"><div class="avatar">{{ message.role==='user' ? 'EU' : message.role==='tool' ? 'T' : 'AI' }}</div><div class="bubble"><b>{{ message.role==='user' ? 'Você' : message.role==='tool' ? 'Tool local' : 'Agente' }}</b><pre>{{ message.content }}</pre><button class="trace-link" *ngIf="message.role==='assistant' && messageRunId(message)" (click)="openMessageTrace(message)"><span>⌁</span><span><small>RASTREABILIDADE</small>{{ messageTraceLabel(message) }}</span><i>›</i></button></div></article>
       <div class="empty hero" *ngIf="!messages.length"><span class="hero-mark">◆</span><h2>O que vamos construir?</h2><p>Escolha um agente único ou uma rede multiagente e converse usando apenas modelos locais.</p><div class="chips"><span>100% local</span><span>Flows versionados</span><span>Stop real</span></div></div>
     </div>
-    <div class="run-timeline" *ngIf="busy && runEvents.length"><span *ngFor="let event of runEvents" [class.active]="event.type==='agent_started' || event.type==='delegated'">{{ event.type==='delegated' ? event.fromAgentName + ' → ' + event.toAgentName : event.agentName }}</span></div>
+    <div class="run-timeline" *ngIf="busy && runEvents.length"><button *ngFor="let event of runEvents" [class.active]="event.type==='agent_started' || event.type==='delegated'" (click)="openCurrentTrace(event)">{{ event.type==='delegated' ? event.fromAgentName + ' → ' + event.toAgentName : traceEventTitle(event) }}</button><button class="open-trace" (click)="openCurrentTrace()">Ver execução completa ›</button></div>
     <div class="generation-status" *ngIf="generationStatus"><i></i>{{ generationStatus }}</div>
     <form class="composer" (ngSubmit)="send()"><div class="composer-box"><textarea [(ngModel)]="input" name="input" placeholder="Envie uma mensagem…" [disabled]="busy || !conversation" (keydown)="onComposerKeydown($event)"></textarea><div class="composer-footer"><label class="profile-toggle"><input type="checkbox" [(ngModel)]="profilingEnabled" name="profiling" [disabled]="busy"> Profiling ativo</label><small>Enter envia · Shift+Enter quebra linha</small><button *ngIf="busy" type="button" class="stop-button" (click)="stopGeneration()">■ Parar</button><button *ngIf="!busy" class="send" [disabled]="!input.trim()">↑</button></div></div></form>
   </section>
@@ -70,6 +70,41 @@
   <section class="main content-page" *ngIf="page==='config' && configTab==='resources'"><header class="topbar"><div class="title-block"><small>CONFIGURAÇÃO</small><h1>Resources do projeto</h1></div><div class="config-head"><div class="config-tabs"><button (click)="setConfigTab('memory')">Memória</button><button (click)="setConfigTab('tools')">Tools</button><button class="active">Resources</button></div><label class="upload primary">＋ Enviar arquivo<input type="file" (change)="upload($event)"></label></div></header><div class="resource-grid"><article class="resource-card" *ngFor="let resource of resources; trackBy: trackId"><span class="file-icon">▤</span><div><b>{{ resource.name }}</b><small>{{ resource.sizeBytes }} bytes</small><pre>{{ resource.preview || 'Arquivo disponível para as tools locais.' }}</pre></div></article></div></section>
 
   <section class="main content-page" *ngIf="page==='config' && configTab==='tools'"><header class="topbar"><div class="title-block"><small>CONFIGURAÇÃO</small><h1>Tools locais</h1></div><div class="config-tabs"><button (click)="setConfigTab('memory')">Memória</button><button class="active">Tools</button><button (click)="setConfigTab('resources')">Resources</button></div></header><div class="tool-layout"><section class="tool-grid"><article class="tool-card" *ngFor="let tool of tools" [class.active]="tool.name===selectedTool" (click)="selectedTool=tool.name"><header><span>⌁</span><label (click)="$event.stopPropagation()"><input type="checkbox" [checked]="enabledTools.includes(tool.name)" (change)="toggleAgentTool(tool.name)"> Chat</label></header><b>{{ tool.displayName }}</b><p>{{ tool.description }}</p><small>v{{ tool.version }} · aprovação obrigatória</small></article></section><section class="tool-runner card"><h2>Execução manual</h2><label>Tool<select [(ngModel)]="selectedTool"><option *ngFor="let tool of tools" [value]="tool.name">{{ tool.displayName }}</option></select></label><label>Resource<select [(ngModel)]="toolResourceId"><option [ngValue]="null">Selecione…</option><option *ngFor="let item of resources" [ngValue]="item.id">{{ item.name }}</option></select></label><label *ngIf="selectedTool==='duckdb_query_csv'">Consulta<textarea [(ngModel)]="toolQuery"></textarea></label><button class="primary" (click)="requestTool()">Revisar execução</button></section></div></section>
+
+  <div class="trace-backdrop" *ngIf="traceOpen" (click)="closeTrace()"></div>
+  <aside class="trace-drawer" *ngIf="traceOpen" (click)="$event.stopPropagation()">
+    <header class="trace-header"><div><small>EXECUÇÃO OBSERVÁVEL</small><h2>Rastreabilidade</h2></div><button (click)="closeTrace()" aria-label="Fechar painel">×</button></header>
+    <div class="trace-loading" *ngIf="traceLoading">Carregando trilha local…</div>
+    <ng-container *ngIf="traceRun as run">
+      <section class="trace-overview">
+        <div><small>STATUS</small><b [attr.data-status]="run.status">{{ run.status }}</b></div><div><small>DURAÇÃO</small><b>{{ formatDuration(run.durationMs) }}</b></div><div><small>MODELO</small><b>{{ run.model }}</b></div><div><small>FLOW</small><b>{{ run.flowName || 'Agente único' }}<span *ngIf="run.flowVersion"> · v{{ run.flowVersion }}</span></b></div>
+      </section>
+      <p class="trace-privacy">Esta visão registra entradas, decisões operacionais, delegações, tools e resultados. Ela não representa raciocínio interno privado do modelo.</p>
+      <section class="trace-controls"><div class="trace-filters"><button [class.active]="traceFilter==='all'" (click)="setTraceFilter('all')">Tudo</button><button [class.active]="traceFilter==='agents'" (click)="setTraceFilter('agents')">Agentes</button><button [class.active]="traceFilter==='tools'" (click)="setTraceFilter('tools')">Tools</button><button [class.active]="traceFilter==='errors'" (click)="setTraceFilter('errors')">Erros</button></div><input [(ngModel)]="traceQuery" placeholder="Buscar na execução…"></section>
+      <section class="trace-timeline">
+        <article class="trace-event" *ngFor="let event of visibleTraceEvents()" [class.selected]="selectedTraceEventId===event.id" [attr.data-type]="event.type">
+          <div class="trace-rail"><span>{{ traceEventIcon(event) }}</span><i></i></div>
+          <div class="trace-event-body"><header><div><b>{{ traceEventTitle(event) }}</b><small>{{ event.at | date:'HH:mm:ss' }}<span *ngIf="event.durationMs"> · {{ formatDuration(event.durationMs) }}</span></small></div><span class="trace-depth" *ngIf="event.depth!==undefined">etapa {{ (event.depth || 0) + 1 }}</span></header><p *ngIf="traceEventSummary(event)">{{ traceEventSummary(event) }}</p>
+            <details [open]="selectedTraceEventId===event.id" *ngIf="event.objective || event.instruction || event.contextPreview || event.memoryPreview || event.result || event.rawProtocol || event.arguments || event.resultPreview || event.error">
+              <summary>Ver detalhes</summary>
+              <div class="trace-detail" *ngIf="event.objective"><small>OBJETIVO RECEBIDO</small><pre>{{ event.objective }}</pre></div>
+              <div class="trace-detail" *ngIf="event.instruction"><small>SYSTEM PROMPT DO AGENTE</small><pre>{{ event.instruction }}</pre></div>
+              <div class="trace-detail" *ngIf="event.contextPreview"><small>CONTEXTO DE OUTROS AGENTES</small><pre>{{ event.contextPreview }}</pre></div>
+              <div class="trace-detail" *ngIf="event.memoryPreview"><small>MEMÓRIA RECUPERADA</small><pre>{{ event.memoryPreview }}</pre></div>
+              <div class="trace-detail" *ngIf="event.availableDelegations?.length"><small>DELEGAÇÕES PERMITIDAS</small><pre>{{ event.availableDelegations | json }}</pre></div>
+              <div class="trace-detail" *ngIf="event.arguments"><small>ARGUMENTOS DA TOOL</small><pre>{{ event.arguments | json }}</pre></div>
+              <div class="trace-detail" *ngIf="event.result"><small>RESULTADO DA ETAPA</small><pre>{{ event.result }}</pre></div>
+              <div class="trace-detail" *ngIf="event.resultPreview"><small>RESULTADO DA TOOL</small><pre>{{ event.resultPreview }}</pre></div>
+              <div class="trace-detail protocol" *ngIf="event.rawProtocol"><small>PROTOCOLO DE ROTEAMENTO</small><pre>{{ event.rawProtocol }}</pre></div>
+              <div class="trace-detail error-detail" *ngIf="event.error"><small>ERRO</small><pre>{{ event.error }}</pre></div>
+            </details>
+          </div>
+        </article>
+        <div class="trace-empty" *ngIf="!visibleTraceEvents().length">Nenhum evento corresponde aos filtros.</div>
+      </section>
+      <footer class="trace-footer"><span>Run #{{ run.id }}</span><span *ngIf="run.profilingFile">Profiling: {{ run.profilingFile }}</span></footer>
+    </ng-container>
+  </aside>
 
   <div class="toast error-toast" *ngIf="error"><span>{{ error }}</span><button (click)="error=''">×</button></div><div class="toast notice-toast" *ngIf="notice"><span>{{ notice }}</span><button (click)="notice=''">×</button></div>
   <div class="approval" *ngIf="approval"><section><div class="approval-icon">!</div><small>APROVAÇÃO EXPLÍCITA</small><h2>Executar {{ approval.tool }}?</h2><pre>{{ approval.arguments | json }}</pre><footer><button class="secondary" (click)="declineTool()">Recusar</button><button class="primary" (click)="approveTool()">Aprovar e executar</button></footer></section></div>

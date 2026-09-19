@@ -16,6 +16,27 @@ from .profiling import write_profile
 
 
 TERMINAL = {"completed", "cancelled", "failed"}
+TRACE_TEXT_LIMIT = 12_000
+
+
+def trace_text(value: object, limit: int = TRACE_TEXT_LIMIT) -> str:
+    """Mantém a trilha útil sem duplicar conteúdos potencialmente enormes."""
+    text = str(value or "")
+    return text if len(text) <= limit else text[:limit] + "\n… [conteúdo truncado]"
+
+
+def trace_agents(events: list[dict]) -> list[dict]:
+    agents: list[dict] = []
+    seen: set[str] = set()
+    for event in events:
+        if event.get("type") != "agent_started":
+            continue
+        agent_id = str(event.get("agentId", ""))
+        if not agent_id or agent_id in seen:
+            continue
+        seen.add(agent_id)
+        agents.append({"id": agent_id, "name": str(event.get("agentName") or agent_id)})
+    return agents
 
 
 def append_event(run: ChatRun, event_type: str, **payload) -> dict:
@@ -138,9 +159,19 @@ def _stream_response(run: ChatRun, messages: list[dict], expose: bool = True) ->
 
 
 def _execute_single(run: ChatRun) -> str:
-    append_event(run, "agent_started", agentId="single", agentName="Agente", message="Agente local analisando a solicitação.")
+    started = monotonic()
+    objective = run.user_message.content if run.user_message_id else ""
+    append_event(
+        run, "agent_started", agentId="single", agentName="Agente", depth=0,
+        message="Agente local analisando a solicitação.", objective=trace_text(objective),
+        instruction="Responder diretamente à conversa usando o modelo local.",
+        availableDelegations=[], memoryPreview="Memória incorporada ao histórico da conversa quando aplicável.",
+    )
     output = _stream_response(run, _history(run))
-    append_event(run, "agent_completed", agentId="single", agentName="Agente")
+    append_event(
+        run, "agent_completed", agentId="single", agentName="Agente", decision="final",
+        result=trace_text(output), durationMs=round((monotonic() - started) * 1000), delegated=False,
+    )
     return output
 
 
@@ -174,7 +205,6 @@ def _execute_flow(run: ChatRun) -> str:
             raise ValueError("O flow excedeu o limite de repetição de um agente.")
         run.current_agent = current_id
         run.save(update_fields=["current_agent"])
-        append_event(run, "agent_started", agentId=current_id, agentName=node["name"], depth=depth, message=f"{node['name']} está analisando a solicitação.")
         targets = [str(edge["target"]) for edge in edges if str(edge.get("source")) == current_id and str(edge.get("target")) in nodes]
         target_help = "\n".join(f"- {target}: {nodes[target]['name']} — {nodes[target].get('systemPrompt', '')[:240]}" for target in targets)
         delegation = (
@@ -188,9 +218,24 @@ def _execute_flow(run: ChatRun) -> str:
             context += f"\n\nResultado da tool {tool_result.tool.name}: {json.dumps(tool_result.result, ensure_ascii=False)}"
         system = f"Você é {node['name']}.\n{node.get('systemPrompt', '')}{delegation}\nNão invente resultados de tools."
         user = f"Solicitação atual:\n{delegated_task}\n\nContexto de outros agentes:\n{context}\n\nMemória relevante:\n{memory or 'Nenhuma'}"
+        agent_started = monotonic()
+        append_event(
+            run, "agent_started", agentId=current_id, agentName=node["name"], depth=depth,
+            message=f"{node['name']} está analisando a solicitação.",
+            objective=trace_text(delegated_task), instruction=trace_text(node.get("systemPrompt", "")),
+            contextPreview=trace_text(context, 4_000), memoryPreview=trace_text(memory or "Nenhuma", 4_000),
+            availableDelegations=[{"id": target, "name": nodes[target]["name"]} for target in targets],
+            tool=str(tool_result.tool.name) if tool_result else None,
+        )
         raw = _stream_response(run, [{"role": "system", "content": system}, {"role": "user", "content": user}], expose=False)
         target, content = _parse_agent_result(raw, set(targets))
-        append_event(run, "agent_completed", agentId=current_id, agentName=node["name"], delegated=bool(target))
+        append_event(
+            run, "agent_completed", agentId=current_id, agentName=node["name"], delegated=bool(target),
+            decision="delegate" if target else "final", targetAgentId=target,
+            targetAgentName=nodes[target]["name"] if target else None,
+            result=trace_text(content), rawProtocol=trace_text(raw, 2_000),
+            durationMs=round((monotonic() - agent_started) * 1000),
+        )
         if target:
             append_event(run, "delegated", fromAgentId=current_id, fromAgentName=node["name"], toAgentId=target, toAgentName=nodes[target]["name"], message=f"{node['name']} delegou para {nodes[target]['name']}.")
             prior_outputs.append(f"{node['name']}: {content or delegated_task}")
@@ -225,9 +270,16 @@ def execute_chat_run(run_id: int) -> None:
         if cancellation_requested(run):
             _cancel(run)
             return
+        run.refresh_from_db(fields=["events"])
         message = Message.objects.create(
             conversation=run.conversation, role="assistant", content=output,
-            metadata={"chatRunId": run.id, "flowId": run.flow_version.flow_id if run.flow_version_id else None},
+            metadata={
+                "chatRunId": run.id,
+                "flowId": run.flow_version.flow_id if run.flow_version_id else None,
+                "flowName": run.flow_version.flow.name if run.flow_version_id else None,
+                "traceAgents": trace_agents(run.events or []),
+                "traceStatus": "completed",
+            },
         )
         run.output = output
         append_event(run, "completed", messageId=message.id)

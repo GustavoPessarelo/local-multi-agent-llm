@@ -7,6 +7,7 @@ from unittest.mock import patch
 from django.conf import settings
 from django.test import TestCase, override_settings
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.core.management import call_command
 
 from .local_llm import base_url
 from .models import ChatRun, Flow, FlowRun, FlowVersion, MemoryEntry, Message, Project, Resource, ToolDefinition, ToolInvocation
@@ -42,6 +43,14 @@ class ToolExecutionTests(TestCase):
 
 
 class ApiWorkflowTests(TestCase):
+    def test_demo_seed_creates_three_idempotent_flows(self):
+        call_command("seed_demo_flow", verbosity=0)
+        call_command("seed_demo_flow", verbosity=0)
+        project = Project.objects.get(name="Exemplo multiagente")
+        self.assertEqual(project.flows.count(), 3)
+        self.assertEqual(FlowVersion.objects.filter(flow__project=project).count(), 3)
+        self.assertEqual(project.conversations.count(), 3)
+
     def test_agent_graph_requires_root_and_rejects_cycle(self):
         graph = {"rootId": "a", "nodes": [{"id": "a", "name": "A", "systemPrompt": "A", "x": 0, "y": 0}, {"id": "b", "name": "B", "systemPrompt": "B", "x": 1, "y": 1}], "edges": [{"id": "1", "source": "a", "target": "b"}]}
         self.assertEqual(validate_graph(graph)["rootId"], "a")
@@ -59,11 +68,41 @@ class ApiWorkflowTests(TestCase):
         run.refresh_from_db()
         self.assertEqual(run.status, "completed")
         self.assertEqual(run.output, "Olá local")
-        self.assertTrue(conversation.messages.filter(role="assistant", content="Olá local").exists())
+        assistant = conversation.messages.get(role="assistant", content="Olá local")
+        self.assertEqual(assistant.metadata["chatRunId"], run.id)
+        self.assertEqual(assistant.metadata["traceAgents"], [{"id": "single", "name": "Agente"}])
+        started = next(item for item in run.events if item["type"] == "agent_started")
+        completed = next(item for item in run.events if item["type"] == "agent_completed")
+        self.assertEqual(started["objective"], "Olá")
+        self.assertEqual(completed["result"], "Olá local")
+        self.assertIn("durationMs", completed)
         queued = ChatRun.objects.create(conversation=conversation, user_message=message, model="local")
         request_cancel(queued)
         queued.refresh_from_db()
         self.assertEqual(queued.status, "cancelled")
+
+    def test_multiagent_chat_persists_observable_trace(self):
+        project = Project.objects.create(name="Projeto")
+        conversation = project.conversations.create(title="Chat multiagente")
+        user_message = Message.objects.create(conversation=conversation, role="user", content="Escreva um texto")
+        flow = Flow.objects.create(project=project, name="Pipeline", active_version=1)
+        version = FlowVersion.objects.create(flow=flow, version=1, graph=FLOW_TEMPLATES[0]["graph"])
+        run = ChatRun.objects.create(conversation=conversation, user_message=user_message, flow_version=version, model="local")
+        responses = [
+            iter(["DELEGATE executor\nTASK: faça um rascunho"]),
+            iter(["DELEGATE reviewer\nTASK: revise o rascunho"]),
+            iter(["FINAL\nResposta revisada"]),
+        ]
+        with patch("core.runtime.stream_chat", side_effect=responses):
+            with patch("core.runtime.memory_context", return_value=""):
+                execute_chat_run(run.id)
+        run.refresh_from_db()
+        assistant = conversation.messages.get(role="assistant")
+        self.assertEqual(run.status, "completed")
+        self.assertEqual(assistant.content, "Resposta revisada")
+        self.assertEqual([item["name"] for item in assistant.metadata["traceAgents"]], ["Planejador", "Executor", "Revisor"])
+        self.assertEqual(len([item for item in run.events if item["type"] == "delegated"]), 2)
+        self.assertEqual(len([item for item in run.events if item["type"] == "agent_completed"]), 3)
 
     def test_profiling_writes_local_json_log(self):
         project = Project.objects.create(name="Projeto")

@@ -12,8 +12,21 @@ export type FlowEdge = { id: string; source: string; target: string };
 export type FlowGraph = { rootId: string; nodes: FlowNode[]; edges: FlowEdge[] };
 export type Flow = { id: number; name: string; description: string; activeVersion: number; updatedAt: string; graph?: FlowGraph };
 export type FlowTemplate = { key: string; name: string; description: string; graph: FlowGraph };
-export type RunEvent = { id: number; type: string; at: string; content?: string; message?: string; error?: string; agentId?: string; agentName?: string; fromAgentName?: string; toAgentName?: string; invocationId?: number; tool?: string; arguments?: Record<string, unknown> };
-export type ChatRun = { id: number; conversationId: number; flowId: number | null; flowVersion: number | null; model: string; status: string; currentAgent: string; events: RunEvent[]; lastEventId: number; output: string; error: string; profilingEnabled: boolean; profilingFile: string; pendingApproval?: {id: number; tool: string; arguments: Record<string, unknown>} | null };
+export type TraceAgent = { id: string; name: string };
+export type RunEvent = {
+  id: number; type: string; at: string; content?: string; message?: string; error?: string;
+  agentId?: string; agentName?: string; fromAgentName?: string; toAgentName?: string;
+  targetAgentId?: string | null; targetAgentName?: string | null; depth?: number; decision?: 'delegate' | 'final'; delegated?: boolean;
+  objective?: string; instruction?: string; contextPreview?: string; memoryPreview?: string; result?: string; rawProtocol?: string;
+  availableDelegations?: TraceAgent[]; durationMs?: number; invocationId?: number; tool?: string | null;
+  arguments?: Record<string, unknown>; resultPreview?: string;
+};
+export type ChatRun = {
+  id: number; conversationId: number; flowId: number | null; flowName: string | null; flowVersion: number | null;
+  model: string; status: string; currentAgent: string; events: RunEvent[]; lastEventId: number; output: string; error: string;
+  profilingEnabled: boolean; profilingFile: string; startedAt?: string | null; completedAt?: string | null; durationMs?: number | null;
+  pendingApproval?: {id: number; tool: string; arguments: Record<string, unknown>} | null;
+};
 export type FlowRun = { id: number; flowId: number; version: number; status: string; task: string; currentNode: string; trace: unknown[]; output: string; error: string };
 export type MemoryEntry = { id: number; kind: 'episodic' | 'long_term' | 'project'; content: string; sourceType: string; sourceId: string; metadata: Record<string, unknown>; createdAt: string };
 export type SearchResult = { type: 'memory' | 'resource'; id: number; kind: string; label: string; content: string; score: number };

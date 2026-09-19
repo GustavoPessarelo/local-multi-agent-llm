@@ -10,6 +10,7 @@ type Page = 'chat' | 'flows' | 'config';
 type ConfigTab = 'memory' | 'tools' | 'resources';
 type Approval = { id: number; tool: string; arguments: Record<string, unknown>; created: boolean; chatRunId?: number };
 type DeleteTarget = { type: 'conversation' | 'project'; id: number; name: string };
+type TraceFilter = 'all' | 'agents' | 'tools' | 'errors';
 
 @Component({
   selector: 'lap-root', standalone: true, imports: [CommonModule, FormsModule],
@@ -44,6 +45,12 @@ export class AppComponent implements OnInit, OnDestroy {
   connectingFromId = '';
   currentRun: ChatRun | null = null;
   runEvents: RunEvent[] = [];
+  traceRun: ChatRun | null = null;
+  traceOpen = false;
+  traceLoading = false;
+  traceFilter: TraceFilter = 'all';
+  traceQuery = '';
+  selectedTraceEventId: number | null = null;
   model = 'google/gemma-3-4b';
   input = '';
   newProjectName = '';
@@ -170,6 +177,7 @@ export class AppComponent implements OnInit, OnDestroy {
 
   async selectConversation(conversation: Conversation) {
     if (this.busy) return;
+    this.closeTrace();
     this.conversation = conversation;
     this.editingConversationTitle = conversation.title;
     try { this.messages = (await this.api.messages(conversation.id)).messages; }
@@ -240,6 +248,8 @@ export class AppComponent implements OnInit, OnDestroy {
         flow_id: this.selectedChatFlowId, profiling_enabled: this.profilingEnabled,
       });
       this.currentRun = response.run;
+      const placeholder = this.messages[this.messages.length - 1];
+      if (placeholder?.role === 'assistant') placeholder.metadata = {chatRunId: response.run.id};
       await this.refreshConversations(conversationId);
       await this.followRun(response.run.id, 0);
     } catch (error) { this.fail(error); this.finishBusy(); }
@@ -296,10 +306,25 @@ export class AppComponent implements OnInit, OnDestroy {
     const type = packet.match(/^event: (.+)$/m)?.[1];
     const raw = packet.match(/^data: (.+)$/m)?.[1];
     if (!type || !raw) return;
-    const event = JSON.parse(raw) as RunEvent & ChatRun;
+    const payload = JSON.parse(raw) as RunEvent | ChatRun;
+    if (type === 'run_state') {
+      const state = payload as ChatRun;
+      this.currentRun = state;
+      if (this.traceRun?.id === state.id) this.traceRun = state;
+      this.render();
+      return;
+    }
+    const event = payload as RunEvent;
     if (typeof event.id === 'number') {
       this.runEvents = [...this.runEvents, event];
-      if (this.currentRun) this.currentRun.lastEventId = Math.max(this.currentRun.lastEventId, event.id);
+      if (this.currentRun) {
+        this.currentRun.lastEventId = Math.max(this.currentRun.lastEventId, event.id);
+        this.currentRun.events = [...this.currentRun.events.filter(item => item.id !== event.id), event];
+      }
+      const openTrace = this.traceRun;
+      if (openTrace && this.currentRun && openTrace.id === this.currentRun.id) {
+        openTrace.events = [...openTrace.events.filter(item => item.id !== event.id), event];
+      }
     }
     if (type === 'run_started') this.generationStatus = 'Execução iniciada no modelo local.';
     if (type === 'agent_started') this.generationStatus = event.message ?? `${event.agentName} trabalhando…`;
@@ -320,6 +345,102 @@ export class AppComponent implements OnInit, OnDestroy {
     this.streamController = undefined;
     if (!this.messages[this.messages.length - 1]?.content && this.messages[this.messages.length - 1]?.role === 'assistant') this.messages = this.messages.slice(0, -1);
     this.render();
+  }
+
+  messageRunId(message: ChatMessage): number | null {
+    const value = Number(message.metadata?.['chatRunId']);
+    return Number.isFinite(value) && value > 0 ? value : null;
+  }
+
+  messageTraceLabel(message: ChatMessage): string {
+    const agents = message.metadata?.['traceAgents'];
+    if (!Array.isArray(agents) || !agents.length) return 'Ver execução';
+    return agents.map(item => String((item as {name?: string}).name ?? '')).filter(Boolean).join(' → ');
+  }
+
+  async openMessageTrace(message: ChatMessage) {
+    const runId = this.messageRunId(message);
+    if (runId) await this.openTrace(runId);
+  }
+
+  async openCurrentTrace(event?: RunEvent) {
+    if (!this.currentRun) return;
+    await this.openTrace(this.currentRun.id, event?.id);
+  }
+
+  async openTrace(runId: number, eventId: number | null = null) {
+    this.traceOpen = true;
+    this.traceLoading = true;
+    this.selectedTraceEventId = eventId;
+    this.traceFilter = 'all';
+    this.traceQuery = '';
+    this.render();
+    try {
+      this.traceRun = (await this.api.chatRun(runId)).run;
+    } catch (error) { this.fail(error); }
+    finally { this.traceLoading = false; this.render(); }
+  }
+
+  closeTrace() {
+    this.traceOpen = false;
+    this.traceRun = null;
+    this.selectedTraceEventId = null;
+  }
+
+  setTraceFilter(filter: TraceFilter) { this.traceFilter = filter; this.render(); }
+
+  visibleTraceEvents(): RunEvent[] {
+    const query = this.traceQuery.trim().toLowerCase();
+    return (this.traceRun?.events ?? []).filter(event => {
+      if (event.type === 'delta') return false;
+      const isAgent = event.type.startsWith('agent_') || event.type === 'delegated';
+      const isTool = event.type.startsWith('tool_');
+      const isError = event.type === 'failed' || event.type === 'cancelled' || event.type === 'cancelling' || Boolean(event.error);
+      if (this.traceFilter === 'agents' && !isAgent) return false;
+      if (this.traceFilter === 'tools' && !isTool) return false;
+      if (this.traceFilter === 'errors' && !isError) return false;
+      if (!query) return true;
+      return JSON.stringify(event).toLowerCase().includes(query);
+    });
+  }
+
+  traceEventTitle(event: RunEvent): string {
+    if (event.type === 'run_started') return 'Execução iniciada';
+    if (event.type === 'agent_started') return `${event.agentName ?? 'Agente'} iniciou`;
+    if (event.type === 'agent_completed') return `${event.agentName ?? 'Agente'} concluiu`;
+    if (event.type === 'delegated') return `${event.fromAgentName ?? 'Agente'} → ${event.toAgentName ?? 'Agente'}`;
+    if (event.type === 'tool_approval_required') return `Aprovação: ${event.tool ?? 'tool'}`;
+    if (event.type === 'tool_completed') return `Tool concluída: ${event.tool ?? 'tool'}`;
+    if (event.type === 'tool_declined') return `Tool recusada: ${event.tool ?? 'tool'}`;
+    if (event.type === 'completed') return 'Execução concluída';
+    if (event.type === 'failed') return 'Execução falhou';
+    if (event.type === 'cancelled') return 'Execução cancelada';
+    if (event.type === 'cancelling') return 'Cancelamento solicitado';
+    return String(event.type || 'evento').replace(/_/g, ' ');
+  }
+
+  traceEventSummary(event: RunEvent): string {
+    if (event.message) return event.message;
+    if (event.type === 'run_started') return `Modelo local: ${this.traceRun?.model ?? ''}`;
+    if (event.type === 'agent_started') return event.objective ? `Objetivo: ${event.objective.slice(0, 180)}` : 'Agente recebeu a etapa.';
+    if (event.type === 'agent_completed') return event.decision === 'delegate' ? `Decidiu delegar para ${event.targetAgentName ?? event.targetAgentId}.` : 'Produziu a resposta desta etapa.';
+    if (event.error) return event.error;
+    return '';
+  }
+
+  traceEventIcon(event: RunEvent): string {
+    if (event.type === 'failed') return '!';
+    if (event.type.startsWith('tool_')) return 'T';
+    if (event.type === 'delegated') return '→';
+    if (event.type === 'agent_started') return 'A';
+    if (event.type === 'agent_completed' || event.type === 'completed') return '✓';
+    if (event.type.includes('cancel')) return '■';
+    return '•';
+  }
+
+  formatDuration(duration?: number | null): string {
+    if (duration === null || duration === undefined) return '—';
+    return duration < 1000 ? `${duration} ms` : `${(duration / 1000).toFixed(2)} s`;
   }
 
   private async reloadConversation() {
