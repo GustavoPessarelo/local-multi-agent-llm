@@ -6,6 +6,8 @@ class ChatInput(BaseModel):
     content: str = Field(min_length=1, max_length=40_000)
     model: str | None = None
     enabled_tools: list[str] = Field(default_factory=list)
+    flow_id: int | None = None
+    profiling_enabled: bool = False
 
 
 class ToolArguments(BaseModel):

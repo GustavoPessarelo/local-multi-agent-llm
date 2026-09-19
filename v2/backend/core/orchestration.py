@@ -20,10 +20,11 @@ FLOW_TEMPLATES = [
         "name": "Planejador → Executor → Revisor",
         "description": "Decompõe a tarefa, produz a solução e faz uma revisão final.",
         "graph": {
+            "rootId": "planner",
             "nodes": [
-                {"id": "planner", "type": "planner", "name": "Planejador", "x": 70, "y": 170, "model": "", "prompt": "Crie um plano objetivo, com critérios de sucesso e riscos.", "tools": [], "memory": ["short_term", "episodic"]},
-                {"id": "executor", "type": "executor", "name": "Executor", "x": 390, "y": 170, "model": "", "prompt": "Execute o plano com precisão e entregue um resultado completo.", "tools": [], "memory": ["short_term", "project"]},
-                {"id": "reviewer", "type": "reviewer", "name": "Revisor", "x": 710, "y": 170, "model": "", "prompt": "Revise o resultado, corrija falhas e produza a resposta final.", "tools": [], "memory": ["episodic", "long_term"]},
+                {"id": "planner", "name": "Planejador", "x": 70, "y": 170, "systemPrompt": "Crie um plano objetivo. Delegue ao Executor quando o plano estiver pronto."},
+                {"id": "executor", "name": "Executor", "x": 390, "y": 170, "systemPrompt": "Execute a tarefa com precisão. Delegue ao Revisor para validar a entrega."},
+                {"id": "reviewer", "name": "Revisor", "x": 710, "y": 170, "systemPrompt": "Revise o resultado, corrija falhas e produza a resposta final."},
             ],
             "edges": [{"id": "e1", "source": "planner", "target": "executor"}, {"id": "e2", "source": "executor", "target": "reviewer"}],
         },
@@ -33,11 +34,12 @@ FLOW_TEMPLATES = [
         "name": "Roteador contextual",
         "description": "Classifica o pedido e direciona para um agente técnico ou de redação antes da revisão.",
         "graph": {
+            "rootId": "router",
             "nodes": [
-                {"id": "router", "type": "router", "name": "Roteador", "x": 60, "y": 190, "model": "", "prompt": "Escolha o especialista mais adequado ao contexto.", "tools": [], "memory": ["short_term"]},
-                {"id": "technical", "type": "executor", "name": "Especialista técnico", "x": 370, "y": 70, "model": "", "prompt": "Resolva tarefas de código, dados e arquitetura de forma verificável.", "tools": [], "memory": ["project", "long_term"]},
-                {"id": "writer", "type": "executor", "name": "Especialista em texto", "x": 370, "y": 310, "model": "", "prompt": "Produza textos claros, consistentes e adequados ao público.", "tools": [], "memory": ["project", "long_term"]},
-                {"id": "reviewer", "type": "reviewer", "name": "Revisor", "x": 710, "y": 190, "model": "", "prompt": "Valide a entrega e apresente a resposta final sem mencionar o processo interno.", "tools": [], "memory": ["episodic"]},
+                {"id": "router", "name": "Roteador", "x": 60, "y": 190, "systemPrompt": "Escolha e delegue ao especialista mais adequado ao pedido."},
+                {"id": "technical", "name": "Especialista técnico", "x": 370, "y": 70, "systemPrompt": "Resolva tarefas de código, dados e arquitetura de forma verificável e delegue ao Revisor."},
+                {"id": "writer", "name": "Especialista em texto", "x": 370, "y": 310, "systemPrompt": "Produza textos claros e adequados ao público, depois delegue ao Revisor."},
+                {"id": "reviewer", "name": "Revisor", "x": 710, "y": 190, "systemPrompt": "Valide a entrega e apresente a resposta final sem mencionar o processo interno."},
             ],
             "edges": [
                 {"id": "e1", "source": "router", "target": "technical"}, {"id": "e2", "source": "router", "target": "writer"},
@@ -59,18 +61,36 @@ def validate_graph(graph: dict) -> dict:
         raise ValueError("IDs de nós devem ser únicos e usar letras, números, _ ou -.")
     known = set(ids)
     for node in nodes:
-        if node.get("type") not in {"planner", "executor", "reviewer", "router"}:
-            raise ValueError("Tipo de agente inválido.")
         node["name"] = str(node.get("name") or node["id"])[:120]
-        node["prompt"] = str(node.get("prompt", ""))[:12_000]
-        node["tools"] = [str(value) for value in node.get("tools", [])][:20]
-        node["memory"] = [str(value) for value in node.get("memory", [])][:10]
+        node["systemPrompt"] = str(node.get("systemPrompt") or node.get("prompt", ""))[:12_000]
         node["x"] = max(0, min(float(node.get("x", 0)), 4000))
         node["y"] = max(0, min(float(node.get("y", 0)), 4000))
+        for legacy in ("prompt", "model", "tools", "memory", "type"):
+            node.pop(legacy, None)
     for edge in edges:
         if edge.get("source") not in known or edge.get("target") not in known or edge.get("source") == edge.get("target"):
             raise ValueError("Aresta inválida.")
-    return {"nodes": nodes, "edges": edges}
+    root_id = str(graph.get("rootId", ""))
+    if root_id not in known:
+        raise ValueError("Defina exatamente um agente root válido.")
+    outgoing = {node_id: [] for node_id in known}
+    for edge in edges:
+        outgoing[edge["source"]].append(edge["target"])
+    visiting, visited = set(), set()
+    def visit(node_id):
+        if node_id in visiting:
+            raise ValueError("O flow contém um ciclo. Remova a delegação circular.")
+        if node_id in visited:
+            return
+        visiting.add(node_id)
+        for target in outgoing[node_id]:
+            visit(target)
+        visiting.remove(node_id)
+        visited.add(node_id)
+    for node_id in known:
+        visit(node_id)
+    clean_edges = [{"id": str(edge.get("id") or f"{edge['source']}-{edge['target']}")[:100], "source": edge["source"], "target": edge["target"]} for edge in edges]
+    return {"rootId": root_id, "nodes": nodes, "edges": clean_edges}
 
 
 def _tool_for_node(run: FlowRun, node: dict) -> ToolInvocation | None:
@@ -140,16 +160,17 @@ def execute_flow(run_id: int) -> None:
                 raise ValueError("O grafo contém ciclo ou dependências não resolvidas.")
             node, node_id = candidate, candidate["id"]
             run.current_node = node_id
-            run.trace = [*trace, {"nodeId": node_id, "name": node["name"], "type": node["type"], "status": "running", "startedAt": timezone.now().isoformat()}]
+            node_type = node.get("type", "agent")
+            run.trace = [*trace, {"nodeId": node_id, "name": node["name"], "type": node_type, "status": "running", "startedAt": timezone.now().isoformat()}]
             run.save(update_fields=["current_node", "trace"])
 
             targets = [edge["target"] for edge in edges if edge["source"] == node_id]
-            if node["type"] == "router" and len(targets) > 1:
+            if node_type == "router" and len(targets) > 1:
                 selected = _select_route(run, node, targets, nodes)
                 for target in targets:
                     if target != selected:
                         skipped.add(target)
-                        trace.append({"nodeId": target, "name": nodes[target]["name"], "type": nodes[target]["type"], "status": "skipped", "reason": f"Rota selecionada: {selected}"})
+                        trace.append({"nodeId": target, "name": nodes[target]["name"], "type": nodes[target].get("type", "agent"), "status": "skipped", "reason": f"Rota selecionada: {selected}"})
                 output = f"Rota selecionada: {nodes[selected]['name']}"
             else:
                 invocation = _tool_for_node(run, node)
@@ -166,10 +187,10 @@ def execute_flow(run_id: int) -> None:
                 short = ""
                 if "short_term" in node.get("memory", []) and run.conversation:
                     short = "\n".join(f"{message.role}: {message.content}" for message in run.conversation.messages.order_by("-created_at")[:8][::-1])
-                system = f"Você é o agente {node['name']} ({node['type']}).\n{node.get('prompt', '')}\nUse somente o contexto fornecido e não invente resultados de tools."
+                system = f"Você é o agente {node['name']} ({node_type}).\n{node.get('systemPrompt') or node.get('prompt', '')}\nUse somente o contexto fornecido e não invente resultados de tools."
                 user = f"Tarefa:\n{run.task}\n\nSaídas anteriores:\n{previous or 'Nenhuma'}\n\nMemória relevante:\n{memory or 'Nenhuma'}\n\nConversa recente:\n{short or 'Nenhuma'}{tool_context}"
                 output = complete(node.get("model") or settings.LOCAL_LLM_DEFAULT_MODEL, [{"role": "system", "content": system}, {"role": "user", "content": user}])
-            trace.append({"nodeId": node_id, "name": node["name"], "type": node["type"], "status": "completed", "output": output, "completedAt": timezone.now().isoformat()})
+            trace.append({"nodeId": node_id, "name": node["name"], "type": node_type, "status": "completed", "output": output, "completedAt": timezone.now().isoformat()})
             completed.add(node_id)
             run.trace = trace
             run.save(update_fields=["trace"])

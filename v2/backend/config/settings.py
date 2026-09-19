@@ -1,5 +1,6 @@
 from pathlib import Path
 import os
+import sys
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 PROJECT_ROOT = BASE_DIR.parent
@@ -17,6 +18,7 @@ if ENV_FILE.is_file():
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "local-development-key-not-for-production")
 DEBUG = os.getenv("DJANGO_DEBUG", "true").lower() == "true"
 ALLOWED_HOSTS = ["127.0.0.1", "localhost"]
+TESTING = "test" in sys.argv
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -31,6 +33,7 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
+    "core.auth.CsvSessionAuthMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
@@ -65,4 +68,6 @@ LOCAL_LLM_DEFAULT_MODEL = os.getenv("LOCAL_LLM_DEFAULT_MODEL", "google/gemma-3-4
 LOCAL_EMBEDDING_MODEL = os.getenv("LOCAL_EMBEDDING_MODEL", "text-embedding-nomic-embed-text-v1.5")
 DATA_ROOT = PROJECT_ROOT / "data"
 DATA_ROOT.mkdir(parents=True, exist_ok=True)
+AUTH_CSV_PATH = DATA_ROOT / "auth" / "users.csv"
+PROFILING_ROOT = DATA_ROOT / "profiling"
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024

@@ -7,46 +7,51 @@ export type Conversation = { id: number; title: string; createdAt: string; updat
 export type ChatMessage = { id?: number; role: 'user' | 'assistant' | 'tool'; content: string; metadata?: Record<string, unknown> };
 export type Resource = { id: number; name: string; sizeBytes: number; preview: string };
 export type Tool = { name: string; displayName: string; description: string; inputSchema: Record<string, string>; requiresApproval: boolean; version: string };
-export type FlowNode = { id: string; type: 'planner' | 'executor' | 'reviewer' | 'router'; name: string; x: number; y: number; model: string; prompt: string; tools: string[]; memory: string[] };
+export type FlowNode = { id: string; name: string; x: number; y: number; systemPrompt: string };
 export type FlowEdge = { id: string; source: string; target: string };
-export type FlowGraph = { nodes: FlowNode[]; edges: FlowEdge[] };
+export type FlowGraph = { rootId: string; nodes: FlowNode[]; edges: FlowEdge[] };
 export type Flow = { id: number; name: string; description: string; activeVersion: number; updatedAt: string; graph?: FlowGraph };
 export type FlowTemplate = { key: string; name: string; description: string; graph: FlowGraph };
-export type TraceItem = { nodeId: string; name: string; type: string; status: string; output?: string; reason?: string; invocationId?: number; tool?: string };
-export type FlowRun = { id: number; flowId: number; version: number; status: string; task: string; currentNode: string; trace: TraceItem[]; output: string; error: string; pendingApproval?: { id: number; tool: string; arguments: Record<string, unknown> } | null };
+export type RunEvent = { id: number; type: string; at: string; content?: string; message?: string; error?: string; agentId?: string; agentName?: string; fromAgentName?: string; toAgentName?: string; invocationId?: number; tool?: string; arguments?: Record<string, unknown> };
+export type ChatRun = { id: number; conversationId: number; flowId: number | null; flowVersion: number | null; model: string; status: string; currentAgent: string; events: RunEvent[]; lastEventId: number; output: string; error: string; profilingEnabled: boolean; profilingFile: string; pendingApproval?: {id: number; tool: string; arguments: Record<string, unknown>} | null };
+export type FlowRun = { id: number; flowId: number; version: number; status: string; task: string; currentNode: string; trace: unknown[]; output: string; error: string };
 export type MemoryEntry = { id: number; kind: 'episodic' | 'long_term' | 'project'; content: string; sourceType: string; sourceId: string; metadata: Record<string, unknown>; createdAt: string };
 export type SearchResult = { type: 'memory' | 'resource'; id: number; kind: string; label: string; content: string; score: number };
 
 @Injectable({ providedIn: 'root' })
 export class ApiService {
   constructor(private readonly http: HttpClient) {}
+  session() { return firstValueFrom(this.http.get<{authenticated: boolean; username: string}>('/api/auth/session')); }
+  login(usuario: string, senha: string) { return firstValueFrom(this.http.post<{authenticated: boolean; username: string}>('/api/auth/login', { usuario, senha })); }
+  logout() { return firstValueFrom(this.http.post('/api/auth/logout', {})); }
   projects() { return firstValueFrom(this.http.get<{projects: Project[]}>('/api/projects')); }
   createProject(name: string) { return firstValueFrom(this.http.post<{project: Project}>('/api/projects', { name })); }
-  deleteProject(projectId: number) { return firstValueFrom(this.http.delete<{deleted: boolean}>(`/api/projects/${projectId}`)); }
+  deleteProject(id: number) { return firstValueFrom(this.http.delete(`/api/projects/${id}`)); }
   conversations(projectId: number) { return firstValueFrom(this.http.get<{conversations: Conversation[]}>(`/api/projects/${projectId}/conversations`)); }
   createConversation(projectId: number) { return firstValueFrom(this.http.post<{conversation: Conversation}>(`/api/projects/${projectId}/conversations`, {})); }
-  renameConversation(conversationId: number, title: string) { return firstValueFrom(this.http.patch<{conversation: Conversation}>(`/api/conversations/${conversationId}`, { title })); }
-  deleteConversation(conversationId: number) { return firstValueFrom(this.http.delete<{deleted: boolean}>(`/api/conversations/${conversationId}`)); }
-  messages(conversationId: number) { return firstValueFrom(this.http.get<{messages: ChatMessage[]}>(`/api/conversations/${conversationId}/messages`)); }
+  renameConversation(id: number, title: string) { return firstValueFrom(this.http.patch<{conversation: Conversation}>(`/api/conversations/${id}`, { title })); }
+  deleteConversation(id: number) { return firstValueFrom(this.http.delete(`/api/conversations/${id}`)); }
+  messages(id: number) { return firstValueFrom(this.http.get<{messages: ChatMessage[]}>(`/api/conversations/${id}/messages`)); }
+  startChat(id: number, body: {content: string; model: string; enabled_tools: string[]; flow_id: number | null; profiling_enabled: boolean}) { return firstValueFrom(this.http.post<{run: ChatRun}>(`/api/conversations/${id}/messages`, body)); }
+  chatRun(id: number, after = 0) { return firstValueFrom(this.http.get<{run: ChatRun}>(`/api/chat-runs/${id}?after=${after}`)); }
+  cancelChat(id: number) { return firstValueFrom(this.http.post<{run: ChatRun}>(`/api/chat-runs/${id}/cancel`, {})); }
   resources(projectId: number) { return firstValueFrom(this.http.get<{resources: Resource[]}>(`/api/projects/${projectId}/resources`)); }
   tools() { return firstValueFrom(this.http.get<{tools: Tool[]}>('/api/tools')); }
   models() { return firstValueFrom(this.http.get<{data: Array<{id: string}>}>('/api/models')); }
   async upload(projectId: number, file: File) { const body = new FormData(); body.append('file', file); return firstValueFrom(this.http.post<{resource: Resource}>(`/api/projects/${projectId}/resources`, body)); }
-  invoke(projectId: number, conversationId: number | null, tool: string, arguments_: Record<string, unknown>) { return firstValueFrom(this.http.post<{invocation: {id: number; status: string}}>(`/api/projects/${projectId}/tools/invocations`, { tool, conversationId, arguments: arguments_ })); }
-  approve(invocationId: number) { return firstValueFrom(this.http.post<{invocation: {id: number; status: string; result: unknown}; assistant: ChatMessage | null; flowRunId?: number}>(`/api/tool-invocations/${invocationId}/approve`, {})); }
-  decline(invocationId: number) { return firstValueFrom(this.http.post<{flowRunId?: number}>(`/api/tool-invocations/${invocationId}/decline`, {})); }
+  invoke(projectId: number, conversationId: number | null, tool: string, arguments_: Record<string, unknown>) { return firstValueFrom(this.http.post<{invocation: {id: number}}>(`/api/projects/${projectId}/tools/invocations`, {tool, conversationId, arguments: arguments_})); }
+  approve(id: number) { return firstValueFrom(this.http.post<{invocation: {result: unknown}; assistant: ChatMessage | null; chatRunId?: number}>(`/api/tool-invocations/${id}/approve`, {})); }
+  decline(id: number) { return firstValueFrom(this.http.post<{chatRunId?: number}>(`/api/tool-invocations/${id}/decline`, {})); }
   flowTemplates() { return firstValueFrom(this.http.get<{templates: FlowTemplate[]}>('/api/flow-templates')); }
   flows(projectId: number) { return firstValueFrom(this.http.get<{flows: Flow[]}>(`/api/projects/${projectId}/flows`)); }
   createFlow(projectId: number, body: {templateKey?: string; name?: string; description?: string; graph?: FlowGraph}) { return firstValueFrom(this.http.post<{flow: Flow}>(`/api/projects/${projectId}/flows`, body)); }
-  flow(flowId: number) { return firstValueFrom(this.http.get<{flow: Flow}>(`/api/flows/${flowId}`)); }
-  renameFlow(flowId: number, name: string, description: string) { return firstValueFrom(this.http.patch<{flow: Flow}>(`/api/flows/${flowId}`, { name, description })); }
-  saveFlowVersion(flowId: number, graph: FlowGraph) { return firstValueFrom(this.http.post<{flow: Flow; version: {version: number; graph: FlowGraph}}>(`/api/flows/${flowId}/versions`, { graph })); }
-  flowVersions(flowId: number) { return firstValueFrom(this.http.get<{versions: Array<{id: number; version: number; graph: FlowGraph; createdAt: string}>}>(`/api/flows/${flowId}/versions`)); }
-  flowRuns(flowId: number) { return firstValueFrom(this.http.get<{runs: FlowRun[]}>(`/api/flows/${flowId}/runs`)); }
-  startFlow(flowId: number, task: string, conversationId: number | null) { return firstValueFrom(this.http.post<{run: FlowRun}>(`/api/flows/${flowId}/runs`, { task, conversationId })); }
-  flowRun(runId: number) { return firstValueFrom(this.http.get<{run: FlowRun}>(`/api/flow-runs/${runId}`)); }
+  flow(id: number) { return firstValueFrom(this.http.get<{flow: Flow}>(`/api/flows/${id}`)); }
+  renameFlow(id: number, name: string, description: string) { return firstValueFrom(this.http.patch(`/api/flows/${id}`, {name, description})); }
+  saveFlowVersion(id: number, graph: FlowGraph) { return firstValueFrom(this.http.post<{version: {version: number; graph: FlowGraph}}>(`/api/flows/${id}/versions`, {graph})); }
+  flowVersions(id: number) { return firstValueFrom(this.http.get<{versions: Array<{id: number; version: number; graph: FlowGraph; createdAt: string}>}>(`/api/flows/${id}/versions`)); }
+  flowRuns(id: number) { return firstValueFrom(this.http.get<{runs: FlowRun[]}>(`/api/flows/${id}/runs`)); }
   memories(projectId: number) { return firstValueFrom(this.http.get<{memories: MemoryEntry[]}>(`/api/projects/${projectId}/memories`)); }
-  createMemory(projectId: number, kind: MemoryEntry['kind'], content: string, conversationId?: number) { return firstValueFrom(this.http.post<{memory: MemoryEntry}>(`/api/projects/${projectId}/memories`, { kind, content, conversationId })); }
-  deleteMemory(memoryId: number) { return firstValueFrom(this.http.delete(`/api/memories/${memoryId}`)); }
-  search(projectId: number, query: string) { return firstValueFrom(this.http.post<{results: SearchResult[]}>(`/api/projects/${projectId}/search`, { query })); }
+  createMemory(projectId: number, kind: MemoryEntry['kind'], content: string, conversationId?: number) { return firstValueFrom(this.http.post<{memory: MemoryEntry}>(`/api/projects/${projectId}/memories`, {kind, content, conversationId})); }
+  deleteMemory(id: number) { return firstValueFrom(this.http.delete(`/api/memories/${id}`)); }
+  search(projectId: number, query: string) { return firstValueFrom(this.http.post<{results: SearchResult[]}>(`/api/projects/${projectId}/search`, {query})); }
 }

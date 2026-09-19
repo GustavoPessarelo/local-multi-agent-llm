@@ -22,11 +22,13 @@ def list_models() -> dict:
     return response.json()
 
 
-def stream_chat(model: str, messages: list[dict]):
+def stream_chat(model: str, messages: list[dict], should_cancel=None):
     payload = {"model": model, "messages": messages, "stream": True, "temperature": 0.2}
     with httpx.stream("POST", f"{base_url()}/chat/completions", json=payload, timeout=120) as response:
         response.raise_for_status()
         for line in response.iter_lines():
+            if should_cancel and should_cancel():
+                return
             if not line or not line.startswith("data: "):
                 continue
             raw = line[6:]

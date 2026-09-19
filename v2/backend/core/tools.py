@@ -19,6 +19,15 @@ BUILTIN_TOOLS = [
 ]
 
 
+class ToolCancelledError(RuntimeError):
+    pass
+
+
+def _check_cancel(should_cancel) -> None:
+    if should_cancel and should_cancel():
+        raise ToolCancelledError("Execução da tool cancelada pelo usuário.")
+
+
 def ensure_builtin_tools() -> None:
     for name, display_name, description, input_schema in BUILTIN_TOOLS:
         ToolDefinition.objects.get_or_create(
@@ -35,15 +44,18 @@ def resource_path(resource: Resource) -> Path:
     return path
 
 
-def execute(invocation: ToolInvocation) -> dict:
+def execute(invocation: ToolInvocation, should_cancel=None) -> dict:
+    _check_cancel(should_cancel)
     args = ToolArguments.model_validate(invocation.arguments)
     resource = Resource.objects.get(id=args.resource_id, project=invocation.project)
     path = resource_path(resource)
 
     if invocation.tool.name == "read_resource":
         result = {"resource": resource.name, "content": path.read_text(encoding="utf-8", errors="replace")[:30_000]}
+        _check_cancel(should_cancel)
     elif invocation.tool.name == "pandas_profile_csv":
         frame = pd.read_csv(path, nrows=50_000)
+        _check_cancel(should_cancel)
         result = {
             "resource": resource.name,
             "rows_sampled": len(frame),
@@ -55,12 +67,15 @@ def execute(invocation: ToolInvocation) -> dict:
         if not re.match(r"^(select|with)\b", query, flags=re.IGNORECASE) or ";" in query:
             raise ValueError("A consulta DuckDB deve ser somente SELECT ou WITH, sem ponto e vírgula.")
         with duckdb.connect(":memory:") as connection:
+            _check_cancel(should_cancel)
             connection.execute("CREATE VIEW source AS SELECT * FROM read_csv_auto(?)", [str(path)])
             rows = connection.execute(f"SELECT * FROM ({query}) AS safe_query LIMIT 200").fetchdf()
+        _check_cancel(should_cancel)
         result = {"resource": resource.name, "rows": rows.fillna("").to_dict(orient="records"), "count": len(rows)}
     else:
         raise ValueError("Tool não reconhecida.")
 
+    _check_cancel(should_cancel)
     invocation.status = "completed"
     invocation.result = result
     invocation.completed_at = timezone.now()

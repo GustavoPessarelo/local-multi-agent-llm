@@ -55,10 +55,11 @@ class ToolDefinition(models.Model):
 
 
 class ToolInvocation(models.Model):
-    STATUS = [("pending", "pending"), ("approved", "approved"), ("declined", "declined"), ("completed", "completed"), ("failed", "failed")]
+    STATUS = [("pending", "pending"), ("approved", "approved"), ("declined", "declined"), ("cancelled", "cancelled"), ("completed", "completed"), ("failed", "failed")]
     project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="tool_invocations")
     conversation = models.ForeignKey(Conversation, on_delete=models.SET_NULL, related_name="tool_invocations", null=True, blank=True)
     flow_run = models.ForeignKey("FlowRun", on_delete=models.SET_NULL, related_name="tool_invocations", null=True, blank=True)
+    chat_run = models.ForeignKey("ChatRun", on_delete=models.SET_NULL, related_name="tool_invocations", null=True, blank=True)
     flow_node_id = models.CharField(max_length=80, blank=True)
     tool = models.ForeignKey(ToolDefinition, on_delete=models.PROTECT)
     arguments = models.JSONField(default=dict)
@@ -109,7 +110,7 @@ class FlowVersion(models.Model):
 
 
 class FlowRun(models.Model):
-    STATUSES = [("queued", "queued"), ("running", "running"), ("awaiting_approval", "awaiting_approval"), ("completed", "completed"), ("failed", "failed")]
+    STATUSES = [("queued", "queued"), ("running", "running"), ("awaiting_approval", "awaiting_approval"), ("cancelling", "cancelling"), ("cancelled", "cancelled"), ("completed", "completed"), ("failed", "failed")]
     flow_version = models.ForeignKey(FlowVersion, on_delete=models.CASCADE, related_name="runs")
     conversation = models.ForeignKey(Conversation, on_delete=models.SET_NULL, related_name="flow_runs", null=True, blank=True)
     task = models.TextField()
@@ -118,8 +119,43 @@ class FlowRun(models.Model):
     trace = models.JSONField(default=list, blank=True)
     output = models.TextField(blank=True)
     error = models.TextField(blank=True)
+    cancel_requested = models.BooleanField(default=False)
+    profiling_enabled = models.BooleanField(default=False)
+    profiling_file = models.CharField(max_length=512, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     started_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+
+class ChatRun(models.Model):
+    STATUSES = [
+        ("queued", "queued"),
+        ("running", "running"),
+        ("awaiting_approval", "awaiting_approval"),
+        ("cancelling", "cancelling"),
+        ("cancelled", "cancelled"),
+        ("completed", "completed"),
+        ("failed", "failed"),
+    ]
+    conversation = models.ForeignKey(Conversation, on_delete=models.CASCADE, related_name="chat_runs")
+    flow_version = models.ForeignKey(FlowVersion, on_delete=models.SET_NULL, related_name="chat_runs", null=True, blank=True)
+    user_message = models.ForeignKey(Message, on_delete=models.SET_NULL, related_name="started_runs", null=True, blank=True)
+    model = models.CharField(max_length=255)
+    enabled_tools = models.JSONField(default=list, blank=True)
+    profiling_enabled = models.BooleanField(default=False)
+    status = models.CharField(max_length=24, choices=STATUSES, default="queued")
+    current_agent = models.CharField(max_length=80, blank=True)
+    events = models.JSONField(default=list, blank=True)
+    output = models.TextField(blank=True)
+    error = models.TextField(blank=True)
+    cancel_requested = models.BooleanField(default=False)
+    profiling_file = models.CharField(max_length=512, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    first_token_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:

@@ -9,8 +9,9 @@ from django.test import TestCase, override_settings
 from django.core.files.uploadedfile import SimpleUploadedFile
 
 from .local_llm import base_url
-from .models import Flow, FlowRun, FlowVersion, MemoryEntry, Project, Resource, ToolDefinition, ToolInvocation
-from .orchestration import FLOW_TEMPLATES, execute_flow
+from .models import ChatRun, Flow, FlowRun, FlowVersion, MemoryEntry, Message, Project, Resource, ToolDefinition, ToolInvocation
+from .orchestration import FLOW_TEMPLATES, execute_flow, validate_graph
+from .runtime import execute_chat_run, request_cancel
 from .tools import ensure_builtin_tools, execute
 
 
@@ -41,6 +42,44 @@ class ToolExecutionTests(TestCase):
 
 
 class ApiWorkflowTests(TestCase):
+    def test_agent_graph_requires_root_and_rejects_cycle(self):
+        graph = {"rootId": "a", "nodes": [{"id": "a", "name": "A", "systemPrompt": "A", "x": 0, "y": 0}, {"id": "b", "name": "B", "systemPrompt": "B", "x": 1, "y": 1}], "edges": [{"id": "1", "source": "a", "target": "b"}]}
+        self.assertEqual(validate_graph(graph)["rootId"], "a")
+        graph["edges"].append({"id": "2", "source": "b", "target": "a"})
+        with self.assertRaisesRegex(ValueError, "ciclo"):
+            validate_graph(graph)
+
+    def test_persistent_chat_run_completes_and_can_be_cancelled(self):
+        project = Project.objects.create(name="Projeto")
+        conversation = project.conversations.create(title="Chat")
+        message = Message.objects.create(conversation=conversation, role="user", content="Olá")
+        run = ChatRun.objects.create(conversation=conversation, user_message=message, model="local")
+        with patch("core.runtime.stream_chat", return_value=iter(["Olá", " local"])):
+            execute_chat_run(run.id)
+        run.refresh_from_db()
+        self.assertEqual(run.status, "completed")
+        self.assertEqual(run.output, "Olá local")
+        self.assertTrue(conversation.messages.filter(role="assistant", content="Olá local").exists())
+        queued = ChatRun.objects.create(conversation=conversation, user_message=message, model="local")
+        request_cancel(queued)
+        queued.refresh_from_db()
+        self.assertEqual(queued.status, "cancelled")
+
+    def test_profiling_writes_local_json_log(self):
+        project = Project.objects.create(name="Projeto")
+        conversation = project.conversations.create(title="Perfil local")
+        message = Message.objects.create(conversation=conversation, role="user", content="Teste")
+        run = ChatRun.objects.create(conversation=conversation, user_message=message, model="local", profiling_enabled=True)
+        with TemporaryDirectory() as temp:
+            root = Path(temp)
+            with override_settings(DATA_ROOT=root, PROFILING_ROOT=root / "profiling"):
+                with patch("core.runtime.stream_chat", return_value=iter(["OK"])):
+                    execute_chat_run(run.id)
+            run.refresh_from_db()
+            self.assertEqual(run.status, "completed")
+            self.assertTrue(run.profiling_file.startswith("profiling/Perfil-local_"))
+            self.assertTrue((root / run.profiling_file).is_file())
+
     def test_conversation_and_project_can_be_deleted(self):
         with TemporaryDirectory() as temp:
             root = Path(temp)

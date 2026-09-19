@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import mimetypes
 import shutil
+import time
 from pathlib import Path
 from uuid import uuid4
 
@@ -17,9 +18,11 @@ from pydantic import ValidationError
 from .contracts import ChatInput, ToolDecision
 from .local_llm import complete, list_models, stream_chat
 from .memory import create_memory, search_project, serialize_memory
-from .models import AuditEvent, Conversation, Flow, FlowRun, FlowVersion, MemoryEntry, Message, Project, Resource, ToolDefinition, ToolInvocation
+from .auth import valid_credentials
+from .models import AuditEvent, ChatRun, Conversation, Flow, FlowRun, FlowVersion, MemoryEntry, Message, Project, Resource, ToolDefinition, ToolInvocation
 from .orchestration import FLOW_TEMPLATES, start_flow_run, validate_graph
-from .tools import ensure_builtin_tools, execute
+from .runtime import append_event, request_cancel
+from .tools import ToolCancelledError, ensure_builtin_tools, execute
 
 
 def data(request) -> dict:
@@ -60,6 +63,28 @@ def serialize_run(run: FlowRun) -> dict:
     }
 
 
+def serialize_chat_run(run: ChatRun, after: int = 0) -> dict:
+    pending = run.tool_invocations.filter(status="pending").select_related("tool").first()
+    events = [item for item in (run.events or []) if int(item.get("id", 0)) > after]
+    return {
+        "id": run.id,
+        "conversationId": run.conversation_id,
+        "flowId": run.flow_version.flow_id if run.flow_version_id else None,
+        "flowVersion": run.flow_version.version if run.flow_version_id else None,
+        "model": run.model,
+        "status": run.status,
+        "currentAgent": run.current_agent,
+        "events": events,
+        "lastEventId": int((run.events or [{}])[-1].get("id", 0)) if run.events else 0,
+        "output": run.output,
+        "error": run.error,
+        "profilingEnabled": run.profiling_enabled,
+        "profilingFile": run.profiling_file,
+        "pendingApproval": {"id": pending.id, "tool": pending.tool.name, "arguments": pending.arguments} if pending else None,
+        "createdAt": run.created_at.isoformat(),
+    }
+
+
 def serialize_resource(resource: Resource) -> dict:
     return {"id": resource.id, "name": resource.name, "mimeType": resource.mime_type, "sizeBytes": resource.size_bytes, "preview": resource.text_preview, "createdAt": resource.created_at.isoformat()}
 
@@ -94,6 +119,34 @@ def tool_decision(model: str, history: list[dict], project: Project, enabled_too
     if decision.type == "tool_call" and decision.tool not in {tool.name for tool in allowed}:
         raise ValueError("O modelo solicitou uma tool que não está habilitada.")
     return decision
+
+
+@csrf_exempt
+def auth_login(request):
+    if request.method != "POST":
+        return JsonResponse({"error": "Método não permitido."}, status=405)
+    payload = data(request)
+    username = str(payload.get("usuario", "")).strip()
+    password = str(payload.get("senha", ""))
+    if not valid_credentials(username, password):
+        return JsonResponse({"error": "Usuário ou senha inválidos."}, status=401)
+    request.session.cycle_key()
+    request.session["local_username"] = username
+    return JsonResponse({"authenticated": True, "username": username})
+
+
+@csrf_exempt
+def auth_logout(request):
+    if request.method != "POST":
+        return JsonResponse({"error": "Método não permitido."}, status=405)
+    request.session.flush()
+    return JsonResponse({"authenticated": False})
+
+
+@require_GET
+def auth_session(request):
+    username = request.session.get("local_username")
+    return JsonResponse({"authenticated": bool(username), "username": username or ""})
 
 
 @require_GET
@@ -200,53 +253,68 @@ def messages(request, conversation_id: int):
     except (ValidationError, ValueError) as error:
         return JsonResponse({"error": str(error)}, status=400)
 
-    Message.objects.create(conversation=conversation, role="user", content=payload.content)
+    user_message = Message.objects.create(conversation=conversation, role="user", content=payload.content)
     if conversation.title == "Nova conversa":
         compact = " ".join(payload.content.split())
         conversation.title = compact[:64] + ("…" if len(compact) > 64 else "")
         conversation.save(update_fields=["title", "updated_at"])
-    history = [{"role": message.role, "content": message.content} for message in conversation.messages.exclude(role="tool").order_by("created_at")]
     model = payload.model or settings.LOCAL_LLM_DEFAULT_MODEL
-
-    def event(name: str, value: dict):
-        return f"event: {name}\ndata: {json.dumps(value, ensure_ascii=False)}\n\n"
-
-    def generate():
-        assembled = ""
+    version = None
+    if payload.flow_id is not None:
+        flow = get_object_or_404(Flow, id=payload.flow_id, project=conversation.project)
         try:
-            yield event("run_started", {"conversationId": conversation.id, "model": model})
-            # A decisão estruturada de tool exige uma segunda inferência completa. Só a
-            # fazemos quando há recursos e o pedido sugere de fato acesso a eles.
-            if should_consider_tools(conversation, payload.enabled_tools):
-                try:
-                    decision = tool_decision(model, history, conversation.project, payload.enabled_tools)
-                    if decision.type == "tool_call" and decision.tool:
-                        tool = ToolDefinition.objects.get(name=decision.tool, enabled=True)
-                        invocation = ToolInvocation.objects.create(project=conversation.project, conversation=conversation, tool=tool, arguments=decision.arguments, status="pending")
-                        AuditEvent.objects.create(project=conversation.project, event_type="tool_requested_by_agent", payload={"invocation_id": invocation.id, "tool": tool.name})
-                        yield event("approval_required", {"invocationId": invocation.id, "tool": tool.name, "arguments": invocation.arguments})
-                        return
-                    assembled = decision.response
-                    assistant = Message.objects.create(conversation=conversation, role="assistant", content=assembled)
-                    yield event("delta", {"content": assembled})
-                    yield event("completed", {"message": serialize_message(assistant)})
-                    return
-                except Exception:
-                    # Modelos locais sem JSON Schema continuam usando o caminho de chat normal.
-                    pass
-            for delta in stream_chat(model, history):
-                assembled += delta
-                yield event("delta", {"content": delta})
-            assistant = Message.objects.create(conversation=conversation, role="assistant", content=assembled)
-            AuditEvent.objects.create(project=conversation.project, event_type="chat_completed", payload={"conversation_id": conversation.id, "message_id": assistant.id, "model": model})
-            yield event("completed", {"message": serialize_message(assistant)})
-        except Exception as error:
-            yield event("failed", {"error": str(error)})
+            version = flow.versions.get(version=flow.active_version)
+            validate_graph(json.loads(json.dumps(version.graph)))
+        except FlowVersion.DoesNotExist:
+            return JsonResponse({"error": "O flow não possui uma versão ativa."}, status=400)
+    run = ChatRun.objects.create(
+        conversation=conversation, user_message=user_message, flow_version=version,
+        model=model, enabled_tools=payload.enabled_tools[:50], profiling_enabled=payload.profiling_enabled,
+    )
+    AuditEvent.objects.create(project=conversation.project, event_type="chat_run_queued", payload={"run_id": run.id, "flow_id": payload.flow_id})
+    return JsonResponse({"run": serialize_chat_run(run)}, status=202)
 
-    response = StreamingHttpResponse(generate(), content_type="text/event-stream")
+
+@require_GET
+def chat_run_detail(request, run_id: int):
+    run = get_object_or_404(ChatRun.objects.select_related("flow_version__flow", "conversation"), id=run_id)
+    after = max(0, int(request.GET.get("after", "0") or 0))
+    return JsonResponse({"run": serialize_chat_run(run, after)})
+
+
+@require_GET
+def chat_run_events(request, run_id: int):
+    run = get_object_or_404(ChatRun, id=run_id)
+    after = max(0, int(request.GET.get("after", "0") or 0))
+
+    def event_stream():
+        cursor = after
+        deadline = time.monotonic() + 125
+        while time.monotonic() < deadline:
+            current = ChatRun.objects.get(id=run.id)
+            fresh = [item for item in (current.events or []) if int(item.get("id", 0)) > cursor]
+            for item in fresh:
+                cursor = int(item["id"])
+                yield f"id: {cursor}\nevent: {item['type']}\ndata: {json.dumps(item, ensure_ascii=False)}\n\n"
+            if current.status in {"completed", "cancelled", "failed", "awaiting_approval"}:
+                yield f"event: run_state\ndata: {json.dumps(serialize_chat_run(current), ensure_ascii=False)}\n\n"
+                return
+            yield ": keep-alive\n\n"
+            time.sleep(0.25)
+
+    response = StreamingHttpResponse(event_stream(), content_type="text/event-stream")
     response["Cache-Control"] = "no-cache"
     response["X-Accel-Buffering"] = "no"
     return response
+
+
+@csrf_exempt
+@require_POST
+def cancel_chat_run(request, run_id: int):
+    run = get_object_or_404(ChatRun, id=run_id)
+    request_cancel(run)
+    run.refresh_from_db()
+    return JsonResponse({"run": serialize_chat_run(run)})
 
 
 @csrf_exempt
@@ -304,9 +372,10 @@ def approve_tool(request, invocation_id: int):
     invocation.save(update_fields=["status"])
     AuditEvent.objects.create(project=invocation.project, event_type="tool_approved", payload={"invocation_id": invocation.id})
     try:
-        result = execute(invocation)
+        should_cancel = (lambda: ChatRun.objects.filter(id=invocation.chat_run_id, cancel_requested=True).exists()) if invocation.chat_run_id else None
+        result = execute(invocation, should_cancel=should_cancel)
         assistant = None
-        if invocation.conversation_id and not invocation.flow_run_id:
+        if invocation.conversation_id and not invocation.flow_run_id and not invocation.chat_run_id:
             tool_message = Message.objects.create(conversation=invocation.conversation, role="tool", content=json.dumps(result, ensure_ascii=False), metadata={"tool": invocation.tool.name, "invocation_id": invocation.id})
             history = [{"role": item.role, "content": item.content} for item in invocation.conversation.messages.exclude(role="tool").order_by("created_at")]
             history.append({"role": "user", "content": f"Resultado da tool {invocation.tool.name}:\n{tool_message.content}\n\nResponda ao pedido original usando este resultado."})
@@ -317,7 +386,20 @@ def approve_tool(request, invocation_id: int):
                 assistant = Message.objects.create(conversation=invocation.conversation, role="assistant", content=f"A tool foi concluída, mas o modelo não pôde sintetizar a resposta: {error}")
         if invocation.flow_run_id:
             start_flow_run(invocation.flow_run_id)
-        return JsonResponse({"invocation": {"id": invocation.id, "status": invocation.status, "result": result}, "assistant": serialize_message(assistant) if assistant else None, "flowRunId": invocation.flow_run_id})
+        if invocation.chat_run_id:
+            chat_run = invocation.chat_run
+            if not chat_run.cancel_requested:
+                chat_run.status = "queued"
+                chat_run.save(update_fields=["status"])
+                append_event(chat_run, "tool_completed", invocationId=invocation.id, tool=invocation.tool.name)
+        return JsonResponse({"invocation": {"id": invocation.id, "status": invocation.status, "result": result}, "assistant": serialize_message(assistant) if assistant else None, "flowRunId": invocation.flow_run_id, "chatRunId": invocation.chat_run_id})
+    except ToolCancelledError as error:
+        invocation.status = "cancelled"
+        invocation.result = {"error": str(error)}
+        invocation.completed_at = timezone.now()
+        invocation.save(update_fields=["status", "result", "completed_at"])
+        AuditEvent.objects.create(project=invocation.project, event_type="tool_cancelled", payload={"invocation_id": invocation.id})
+        return JsonResponse({"error": str(error), "cancelled": True}, status=409)
     except Exception as error:
         invocation.status = "failed"
         invocation.result = {"error": str(error)}
@@ -337,7 +419,13 @@ def decline_tool(request, invocation_id: int):
     AuditEvent.objects.create(project=invocation.project, event_type="tool_declined", payload={"invocation_id": invocation.id})
     if invocation.flow_run_id:
         start_flow_run(invocation.flow_run_id)
-    return JsonResponse({"invocation": {"id": invocation.id, "status": invocation.status}, "flowRunId": invocation.flow_run_id})
+    if invocation.chat_run_id:
+        chat_run = invocation.chat_run
+        if not chat_run.cancel_requested:
+            chat_run.status = "queued"
+            chat_run.save(update_fields=["status"])
+            append_event(chat_run, "tool_declined", invocationId=invocation.id, tool=invocation.tool.name)
+    return JsonResponse({"invocation": {"id": invocation.id, "status": invocation.status}, "flowRunId": invocation.flow_run_id, "chatRunId": invocation.chat_run_id})
 
 
 @require_GET
