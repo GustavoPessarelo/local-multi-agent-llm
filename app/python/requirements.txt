@@ -1,5 +1,0 @@
-fastapi
-httpx
-langflow
-pydantic
-uvicorn[standard]

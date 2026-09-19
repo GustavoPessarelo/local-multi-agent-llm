@@ -1,24 +1,29 @@
-# Dados e credenciais locais
+# Configuração, credenciais e dados locais
 .env
 .env.local
-.indev/
-.venv/
+data/
+.logs/
+.legacy-local-backup/
 
-# Dependências e artefatos de execução
-app/node_modules/
-app/.next/
-app/dist/
-app/.wrangler/
-app/.vinext/
+# Ambientes Python
+.venv/
+.venv*/
 __pycache__/
 *.py[cod]
 
-# Runtime isolado da plataforma v2
-v2/.venv/
-v2/.venv314/
-v2/frontend/node_modules/
-v2/frontend/dist/
-v2/backend/db.sqlite3
-v2/data/
-v2/.logs/
-v2/.env
+# Django
+backend/db.sqlite3
+backend/staticfiles/
+
+# Angular / Node
+frontend/node_modules/
+frontend/dist/
+frontend/.angular/
+frontend/coverage/
+npm-debug.log*
+
+# Editores e sistema operacional
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

@@ -21,6 +21,7 @@ if (-not (Test-Path -LiteralPath $usersCsv)) {
 }
 
 & $pythonExe $managePy migrate --noinput
+& $pythonExe $managePy seed_demo_flow
 
 Start-Process -FilePath $pythonExe -ArgumentList @("backend\manage.py", "run_agent_worker") -WorkingDirectory $projectRoot -WindowStyle Hidden
 

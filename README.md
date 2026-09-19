@@ -1,338 +1,393 @@
-# InDev
-
-Espaço para transformar a ideia do InDev em um produto claro, útil e construível.
-
-## Execução atual — modelos locais
-
-Esta cópia inicia somente a interface local e usa um servidor de modelos compatível com a API OpenAI em `localhost`. O ambiente validado usa `http://localhost:1234/v1` e o modelo `google/gemma-3-4b`.
-
-Pré-requisitos:
-
-- Node.js 22.13 ou superior, com npm.
-- Um servidor local de modelos ativo e com ao menos um modelo carregado.
-
-Dentro de `app`:
-
-```bash
-npm ci
-npm run doctor
-npm run dev
-```
-
-Abra `http://localhost:3001`. O InDev consulta o catálogo local em `/v1/models` e conversa por `/v1/chat/completions`, com streaming. Não requer chave da OpenAI nem inicia o Codex App Server.
-
-Copie `app/.env.example` para `app/.env.local` apenas se a porta, URL ou modelo padrão forem diferentes.
-
-## Histórico — implementação anterior OpenAI/Codex
-
-Esta é a branch principal do InDev. Ela executa o Codex App Server incluído no próprio repositório e usa a OpenAI como provedora de LLM. Não é necessário instalar o Codex Desktop nem um comando `codex` global.
-
-### 1. Pré-requisitos
-
-- Git.
-- Node.js 22.13 ou superior, acompanhado do npm.
-- Internet para instalar as dependências e acessar os modelos.
-- Uma conta compatível com o login do Codex ou uma chave `OPENAI_API_KEY`.
-
-Esta branch não usa Python, `pip` ou Artifactory. Para o provedor Iara, use a branch [`indev-iara`](https://github.com/vitorribas0/indev/tree/indev-iara), cujo README contém as instruções corporativas.
-
-### 2. Clonar a branch correta
-
-```bash
-git clone --branch main https://github.com/vitorribas0/indev.git
-cd indev
-```
-
-Se o repositório já existe:
-
-```bash
-git fetch origin
-git switch main
-git pull --ff-only
-```
-
-### 3. Instalar as dependências
-
-No Windows PowerShell, macOS ou Linux:
-
-```bash
-cd app
-npm ci
-```
-
-O `npm ci` lê o `package-lock.json` e instala as versões exatas, inclusive o pacote `@openai/codex` apropriado para Windows, macOS ou Linux.
-
-### 4. Escolher a autenticação
-
-#### Opção A — login seguro do Codex
-
-Dentro de `app`:
-
-```bash
-npm run setup
-```
-
-Se ainda não houver uma sessão, o comando abre o fluxo de login. Os dados privados ficam em `.indev/codex-home` dentro do clone e não são enviados ao Git.
-
-#### Opção B — chave da API
-
-No Windows PowerShell, a partir da raiz do repositório:
-
-```powershell
-Copy-Item app\.env.example app\.env.local
-```
-
-No macOS ou Linux:
-
-```bash
-cp app/.env.example app/.env.local
-```
-
-Preencha `app/.env.local`:
-
-```env
-OPENAI_API_KEY=SUA_CHAVE
-OPENAI_MODEL=gpt-5.6-luna
-OPENAI_MASSIVA_MODEL=gpt-5.6-luna
-```
-
-Nunca envie o `.env.local` ao Git. Ele já está ignorado pelo projeto.
-
-A conversa principal aceita o login do Codex ou a chave. A tool `analise_massiva_llm`, que realiza uma chamada por linha da planilha, exige `OPENAI_API_KEY` porque usa a API diretamente e mostra uma confirmação de custo antes de executar.
-
-### 5. Rodar o sistema no terminal
-
-Dentro de `app`:
-
-```bash
-npm run dev
-```
-
-Abra `http://localhost:3001`. O sistema permanece local; esse comando não publica nenhum site.
-
-O processo inicia automaticamente:
-
-1. Codex App Server local.
-2. Ponte segura entre o navegador e o App Server.
-3. Interface InDev.
-
-### 6. Inicializadores por sistema operacional
-
-Depois do clone, também é possível iniciar pela raiz do projeto:
-
-- Windows CMD: dê dois cliques em `start-indev.cmd` ou execute `start-indev.cmd`.
-- Windows PowerShell: `.\start-indev.ps1`.
-- macOS ou Linux: `./start-indev.sh`.
-
-Os inicializadores instalam as dependências, validam a autenticação e iniciam o InDev. Eles não publicam a aplicação.
-
-### 7. Confirmar que está tudo funcionando
-
-Dentro de `app`:
-
-```bash
-npm run doctor
-npm run lint
-npm test
-```
-
-Para o teste de ponta a ponta com uma resposta real do modelo:
-
-```bash
-npm run test:e2e
-```
-
-O último comando usa a conta ou chave configurada e pode consumir tokens.
-
-### 8. Solução rápida de problemas
-
-- **Node incompatível:** confirme `node --version`; é necessário 22.13 ou superior.
-- **Login ausente:** execute `npm run setup` novamente.
-- **API key ausente na análise massiva:** preencha `OPENAI_API_KEY` em `app/.env.local`.
-- **Porta ocupada:** encerre outra execução do InDev; as portas padrão são 3001, 4501 e 4502.
-- **Dependência corrompida:** dentro de `app`, execute novamente `npm ci`.
-- **Windows bloqueou o script PowerShell:** use `start-indev.cmd` ou execute os comandos `npm ci`, `npm run setup` e `npm run dev` diretamente no terminal.
-
-Histórico operacional e uploads ficam em `.indev/`; credenciais ficam em `app/.env.local` ou no armazenamento privado do Codex. Ambos são ignorados pelo Git.
-
-## Em uma frase
-
-> O InDev será um ambiente de desenvolvimento com IA capaz de entender um projeto, planejar mudanças, escrever código, testar e revisar entregas — com uma experiência tão boa quanto ou melhor que a do Codex.
-
-## Visão inicial
-
-O objetivo não é tentar reproduzir, do zero, um modelo de IA de fronteira. O objetivo é criar um **produto de desenvolvimento assistido por IA**: uma experiência integrada que pode usar modelos disponíveis no mercado e se diferenciar pela qualidade do fluxo de trabalho, contexto do projeto, controle e confiança.
-
-## Princípios do produto
-
-- Entender o projeto antes de alterar qualquer arquivo.
-- Mostrar um plano claro e permitir aprovação antes das mudanças relevantes.
-- Executar testes e explicar o que mudou.
-- Manter cada tarefa rastreável: intenção, alterações, comandos e resultado.
-- Deixar a pessoa no controle de permissões, custos e dados.
-
-## O que significa “igual ou melhor”
-
-| Área | Meta para o InDev |
-| --- | --- |
-| Entendimento | Ler estrutura, documentação, dependências e histórico relevante do projeto. |
-| Execução | Criar e editar arquivos, rodar comandos, testes e verificações. |
-| Colaboração | Explicar decisões, pedir autorização quando necessário e manter histórico das tarefas. |
-| Qualidade | Propor plano, revisar o próprio trabalho e validar antes de entregar. |
-| Experiência | Ser simples para começar, mas dar visibilidade e controle a quem desenvolve. |
-
-## Direção de interface
-
-O InDev terá uma experiência de conversa orientada a tarefas, com uma área de contexto expansível para acompanhar o trabalho em tempo real. A referência é a clareza de ferramentas como o Codex, mas com marca, componentes e identidade visual próprios.
-
-```
-┌───────────────────────────────┬──────────────────────────────────┐
-│ InDev                         │ Tarefa atual                     │
-│                               │ ──────────────────────────────── │
-│ Conversa                      │ Arquivos alterados               │
-│                               │ • src/...                        │
-│ Você: implemente X            │                                  │
-│                               │ Execução                         │
-│ InDev: plano + progresso      │ ✓ testes                         │
-│                               │ • comando em andamento           │
-│ [ Escreva uma mensagem... ]   │                                  │
-│                               │ Resultado / revisão              │
-└───────────────────────────────┴──────────────────────────────────┘
-```
-
-### Painel lateral de tarefa
-
-- Pode ser aberto, fechado ou redimensionado.
-- Mostra plano, progresso e arquivos envolvidos.
-- Exibe comandos e testes: aguardando, em execução, concluído ou com falha.
-- Reúne diffs, resultados e pontos que precisam de aprovação.
-- Permite voltar a tarefas anteriores sem perder o histórico.
-
-O primeiro preview visual está em [design/indev-preview.html](design/indev-preview.html).
-
-## Implementação atual
-
-A aplicação local está em `app/` e já usa o **Codex App Server público** como motor principal. A interface laranja/glass recebe respostas em streaming e mostra o trabalho do agente em tempo real.
-
-O motor não depende mais do Codex Desktop ou de um comando `codex` instalado na máquina. O pacote oficial `@openai/codex` está fixado no `package.json` e no lockfile; na instalação, o npm baixa automaticamente o binário correto para Windows, macOS ou Linux.
-
-Já estão conectados:
-
-- Conta e catálogo de modelos do Codex local.
-- Tarefas persistentes e retomada de histórico.
-- Tools, comandos, terminal, plano, diffs e alterações de arquivos.
-- Sandbox de leitura ou escrita limitada ao projeto.
-- Pedidos de aprovação para ações protegidas.
-- Upload local de arquivos e seleção de contexto com `@`.
-- Leitura automática de Excel `.xlsx`, incluindo múltiplas abas e milhares de linhas.
-- Catálogo de skills e envio de skills para a tarefa.
-- Comandos `/new`, `/interrupt`, `/compact`, `/skills` e `/status`.
-- Responses API como modo de reserva caso o App Server não esteja disponível.
-- Registro extensível de tools locais, com validação automática de parâmetros e aprovação de uso único para operações com custo ou risco.
-- Tool `analise_massiva_llm` para classificar linhas de Excel com GPT-5.6 Luna e salvar o resultado separado por chat.
-- Renderer genérico de documentos em Markdown com perfis visuais versionados; o primeiro perfil implementa documentação Itaú em HTML standalone.
-
-### Começar no Windows
-
-Requisito: [Node.js](https://nodejs.org/) 22.13 ou superior. Windows 11 é recomendado.
-
-Depois de clonar o repositório, dê dois cliques em:
+# Local Agent Studio
+
+Plataforma local em Angular e Django para conversar com LLMs, executar tools e
+montar sistemas multiagentes em um canvas low-code. A aplicação usa somente um
+servidor de inferência OpenAI-compatible em loopback e rejeita endpoints de
+modelos externos.
+
+## O que já funciona
+
+- chat single-agent e multiagente com streaming;
+- flows versionados com agente root e arestas de delegação dirigidas;
+- acompanhamento em tempo real e cancelamento da execução;
+- painel de rastreabilidade por resposta, com agentes, delegações, memória,
+  tools, resultados intermediários e duração;
+- memória episódica, longa e de projeto;
+- resources locais e tools com aprovação explícita;
+- autenticação interna por CSV;
+- profiling opcional por conversa;
+- frontend acessível pela rede privada, mantendo Django e a LLM em localhost.
+
+## Arquitetura
 
 ```text
-start-indev.cmd
+Navegador :4200
+    │
+    ▼
+Angular ──proxy /api──► Django :8000 ──► SQLite
+                            │
+                            ├──► worker persistente de agentes
+                            ├──► memória/resources/tools locais
+                            └──► API OpenAI-compatible :1234
+                                      └──► modelo carregado localmente
 ```
 
-Também é possível usar o PowerShell:
+O frontend nunca chama a LLM diretamente. O backend aceita apenas
+`127.0.0.1`, `localhost` ou `::1` em `LOCAL_LLM_BASE_URL`.
+
+## Requisitos
+
+No Windows, instale:
+
+- Git;
+- Python 3.11 ou superior;
+- Node.js 22 LTS ou 24, com npm;
+- LM Studio ou LM Studio Bionic;
+- um modelo de chat local, como Gemma, Qwen ou Llama.
+
+Confira a instalação:
 
 ```powershell
-.\start-indev.ps1
+git --version
+py --version
+node --version
+npm --version
 ```
 
-O inicializador instala as dependências do próprio projeto, conduz o login da OpenAI e abre todos os componentes locais. Ele não publica o site.
+## 1. Clonar o repositório
 
-### Começar no macOS ou Linux
-
-```bash
-./start-indev.sh
+```powershell
+git clone https://github.com/GustavoPessarelo/local-multi-agent-llm.git
+cd local-multi-agent-llm
 ```
 
-### Execução manual
+## 2. Criar o ambiente Python
 
-```bash
-cd app
-npm install
-npm run setup
-npm run dev
+Python 3.11 é a opção conservadora. Se ele estiver instalado:
+
+```powershell
+py -3.11 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+pip install -r backend\requirements.txt
 ```
 
-Abra `http://localhost:3001`. O comando inicia automaticamente o site, o Codex App Server incluído no projeto e uma ponte WebSocket que só aceita a origem local do InDev.
+Também é possível usar uma versão mais nova:
 
-### O que está no repositório
-
-- Frontend, backend de reserva, ponte segura, harness, testes e inicializadores multiplataforma.
-- Versão exata do Codex e de todas as dependências registrada em `package-lock.json`.
-- Configuração de exemplo em `app/.env.example`.
-- Diagnóstico local com `npm run doctor`.
-
-O `node_modules` não é enviado ao Git: ele é reproduzido pelo `npm install` usando o lockfile. Modelos de IA continuam sendo serviços da OpenAI e exigem internet e uma conta ou chave válida.
-
-Login, chave, histórico e uploads ficam em `.indev/` dentro do clone, mas essa pasta é ignorada pelo Git para não vazar dados privados. Como alternativa ao login pelo navegador, copie `app/.env.example` para `app/.env.local` e preencha `OPENAI_API_KEY`; nunca versione esse arquivo.
-
-### Verificações
-
-```bash
-npm run lint
-npm test
-npm run test:e2e
+```powershell
+py -3.14 -m venv .venv314
+.\.venv314\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+pip install -r backend\requirements.txt
 ```
 
-O teste de ponta a ponta inicializa o Codex, carrega conta/modelos/skills, armazena um arquivo local, envia esse arquivo ao agente e confirma a resposta da LLM em streaming.
+O launcher procura primeiro `.venv314` e depois `.venv`. Se o PowerShell
+bloquear a ativação, libere scripts apenas para a sessão atual:
 
-### Limite honesto
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+```
 
-O InDev integra a superfície pública disponível no Codex App Server; ele não copia serviços proprietários internos da OpenAI nem promete paridade com partes que não foram publicadas. O transporte WebSocket do App Server ainda é experimental, por isso esta versão o limita ao computador local. A base atual, porém, já é um harness funcional e não apenas uma tela simulada.
+## 3. Instalar o frontend
 
-## Primeira hipótese de público
+O `package-lock.json` já fixa as versões usadas pelo projeto:
 
-Pessoas e pequenas equipes que desenvolvem software e querem um agente de IA que trabalhe dentro do projeto, com contexto e transparência — não apenas gere trechos isolados de código.
+```powershell
+cd frontend
+npm ci
+cd ..
+```
 
-## Mapa inicial
+Use `npm install` somente quando estiver alterando dependências. Avisos de
+`funding` não impedem o projeto de funcionar. Antes de aplicar correções
+automáticas de auditoria com `--force`, confira se elas trocam versões major.
 
-### 1. Problema
+## 4. Instalar LM Studio ou Bionic
 
-- Qual dor concreta queremos resolver?
-- Em que momento ela aparece?
-- Como as pessoas lidam com isso hoje?
+Baixe o instalador na [página oficial do LM Studio](https://lmstudio.ai/download).
+Bionic é um aplicativo separado, feito para fluxos agentic, mas utiliza o mesmo
+runtime local. Para este projeto, o que importa é habilitar sua API local
+OpenAI-compatible.
 
-### 2. Pessoas usuárias
+### Opção A — LM Studio
 
-- Quem usará o InDev primeiro?
-- Quais são seus objetivos e limitações?
-- O que faria essa pessoa voltar a usar o produto?
+1. Abra o LM Studio.
+2. Vá em **Discover** e baixe um modelo que caiba na RAM/VRAM disponível. Uma
+   quantização de 4 bits costuma ser um bom ponto de partida.
+3. Carregue o modelo em **Chat** ou **Developer**.
+4. Abra **Developer** e ative **Start server**.
+5. Confira a porta exibida. O padrão é `1234`.
 
-### 3. Proposta de valor
+O servidor também pode ser iniciado pela CLI:
 
-- Qual resultado o InDev entrega?
-- O que o diferencia das alternativas existentes?
+```powershell
+lms server start --port 1234
+```
 
-### 4. Primeira versão
+Consulte a documentação oficial de
+[servidor local](https://lmstudio.ai/docs/developer/core/server) e dos
+[endpoints OpenAI-compatible](https://lmstudio.ai/docs/developer/openai-compat).
 
-- Qual é a menor experiência que já comprova valor?
-- O que fica deliberadamente fora da versão inicial?
-- Como vamos medir se ela funcionou?
+### Opção B — LM Studio Bionic
 
-## Próximos passos
+1. Abra **Settings → Local Models → Explore**.
+2. Baixe um modelo local e confirme que ele aparece em **Library**.
+3. Abra **Settings → Local Model API**.
+4. Ative o servidor de API local.
+5. Copie o endereço e a porta mostrados, normalmente
+   `http://127.0.0.1:1234`.
 
-1. Definir o público inicial com mais precisão.
-2. Escolher o primeiro ambiente: aplicativo desktop, extensão de editor ou web.
-3. Listar as três funcionalidades essenciais da primeira versão.
-4. Decidir quais modelos de IA poderão ser usados inicialmente.
-5. Validar a hipótese com pessoas desenvolvedoras reais.
+Veja o guia oficial para
+[baixar modelos no Bionic](https://lmstudio.ai/docs/bionic/models/download-local-models).
+Não selecione um modelo cloud se o objetivo for manter toda a inferência local.
 
-## Decisões
+### Testar a API local
 
-| Data | Decisão | Motivo |
-| --- | --- | --- |
-| 2026-08-26 | Repositório criado | Centralizar o mapeamento e a evolução da ideia. |
-| 2026-08-26 | InDev como ambiente de desenvolvimento com IA | Focar no produto e na experiência, combinando modelos de IA existentes em vez de tentar treinar um modelo de fronteira do zero. |
-| 2026-08-26 | Interface de conversa com painel lateral de tarefa | Tornar visível o trabalho do agente: arquivos, execuções, resultados e aprovações. |
+Com o servidor ativo, execute:
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:1234/v1/models
+```
+
+A resposta precisa conter `data` e pelo menos um identificador de modelo. Para
+testar uma geração, substitua o valor de `model` por um ID retornado acima:
+
+```powershell
+$body = @{
+  model = "google/gemma-3-4b"
+  messages = @(@{ role = "user"; content = "Responda apenas: API local OK" })
+  stream = $false
+} | ConvertTo-Json -Depth 5
+
+Invoke-RestMethod `
+  -Uri http://127.0.0.1:1234/v1/chat/completions `
+  -Method Post `
+  -ContentType "application/json" `
+  -Body $body
+```
+
+## 5. Configurar o `.env`
+
+Crie a configuração local:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+Exemplo:
+
+```dotenv
+LOCAL_LLM_BASE_URL=http://127.0.0.1:1234/v1
+LOCAL_LLM_DEFAULT_MODEL=google/gemma-3-4b
+LOCAL_EMBEDDING_MODEL=text-embedding-nomic-embed-text-v1.5
+LAN_ACCESS=false
+DJANGO_SECRET_KEY=troque-esta-chave
+DJANGO_DEBUG=true
+```
+
+- `LOCAL_LLM_BASE_URL`: use a porta exibida no LM Studio/Bionic e mantenha
+  `/v1` no final;
+- `LOCAL_LLM_DEFAULT_MODEL`: ID exato retornado por `/v1/models`;
+- `LOCAL_EMBEDDING_MODEL`: modelo local de embeddings; se não estiver
+  carregado, a busca usa fallback lexical;
+- `LAN_ACCESS=true`: expõe somente o Angular na rede privada pela porta 4200;
+- `.env`, banco, modelos, uploads, logs e credenciais não entram no Git.
+
+## 6. Preparar o banco e os exemplos
+
+O launcher aplica migrações automaticamente, mas a preparação manual é útil
+para validar a instalação:
+
+```powershell
+python backend\manage.py migrate
+python backend\manage.py seed_demo_flow
+```
+
+O comando cria o projeto **Exemplo multiagente** com três flows:
+
+1. **Planejar, redigir e revisar** — Planejador → Redator → Revisor;
+2. **Laboratório de código** — Arquiteto → Desenvolvedor → QA;
+3. **Conselho crítico** — Analista → Crítico → Sintetizador.
+
+Ele pode ser executado novamente sem duplicar flows. Quando um exemplo muda,
+uma nova versão do flow é criada.
+
+## 7. Iniciar a aplicação
+
+Deixe o modelo carregado e a API local ativa. Na raiz do repositório:
+
+```powershell
+.\scripts\dev.ps1
+```
+
+O script aplica as migrações, cria/atualiza os flows de demonstração e inicia:
+
+- Angular: `http://127.0.0.1:4200`;
+- Django: `http://127.0.0.1:8000`;
+- worker persistente de agentes.
+
+Abra somente:
+
+```text
+http://localhost:4200
+```
+
+Credencial criada automaticamente na primeira execução:
+
+```text
+Usuário: admin
+Senha: localagent2026
+```
+
+As credenciais ficam em `data/auth/users.csv`, nas colunas `usuario,senha`.
+Essa autenticação é adequada apenas para uso interno/local e não armazena
+senhas com hash.
+
+Para encerrar processos iniciados no terminal, pressione `Ctrl+C`. Como o
+launcher abre alguns processos em segundo plano no Windows, se uma porta ficar
+ocupada confira o PID:
+
+```powershell
+netstat -ano | findstr :4200
+netstat -ano | findstr :8000
+```
+
+Encerre somente o PID identificado para este projeto:
+
+```powershell
+Stop-Process -Id 12345
+```
+
+## Como testar os exemplos
+
+1. Entre no sistema.
+2. Selecione **Exemplo multiagente**.
+3. Abra uma das conversas de teste.
+4. No seletor superior, troque **Agente único** pelo flow correspondente.
+5. Envie uma tarefa.
+6. Acompanhe os agentes na timeline.
+7. Depois da resposta, clique em **Rastreabilidade** para inspecionar entradas,
+   memória, decisões, delegações, resultados e duração.
+
+Sugestões:
+
+```text
+Laboratório de código:
+Crie uma função Python que agrupe vendas por categoria e valide entradas vazias.
+
+Conselho crítico:
+Compare SQLite e PostgreSQL para um produto local-first com sincronização futura.
+```
+
+## Como criar flows funcionais
+
+### Modelo mental
+
+- cada caixa é um agente com nome e `system prompt`;
+- exatamente um agente precisa ser o **root**;
+- uma aresta `A → B` significa que A pode invocar B;
+- a execução começa no root e termina quando um agente produz `FINAL`;
+- o grafo não pode possuir ciclos;
+- o runtime limita a execução a oito delegações e duas visitas por agente.
+
+### Passo a passo no canvas
+
+1. Abra **Flows** e clique em **Em branco**.
+2. Adicione os agentes.
+3. Selecione cada agente e escreva apenas seu system prompt.
+4. Selecione o primeiro agente e clique em **Definir como root**.
+5. Para criar uma aresta, clique no botão `+` do agente de origem e depois no
+   card do agente de destino.
+6. Confira a seta e a lista de delegações no inspetor.
+7. Clique em **Salvar versão**.
+8. Volte ao Chat e selecione o flow no topo antes de enviar a mensagem.
+
+### Prompts que delegam com confiabilidade
+
+Modelos pequenos obedecem melhor a instruções explícitas. Para um agente que
+deve sempre chamar `reviewer`, use:
+
+```text
+Analise e produza um rascunho. Não entregue a resposta final.
+Delegue obrigatoriamente ao Revisor.
+Na primeira linha escreva exatamente: DELEGATE reviewer
+Na segunda linha comece com TASK: e inclua todo o material para revisão.
+```
+
+Para o último agente:
+
+```text
+Revise o material recebido e entregue a resposta ao usuário.
+Na primeira linha escreva exatamente: FINAL
+Nas linhas seguintes escreva somente a resposta final.
+```
+
+O ID usado depois de `DELEGATE` é o ID interno do nó, não apenas seu nome
+visual. O runtime acrescenta automaticamente ao prompt os IDs permitidos pelas
+arestas. Evite pedir ao mesmo agente para “responder” e “delegar” ao mesmo tempo.
+
+### Checklist de diagnóstico
+
+Se apenas o primeiro agente executar:
+
+- confirme que a aresta foi criada e que o flow foi salvo;
+- confira se o agente root está correto;
+- deixe explícito no prompt que a delegação é obrigatória;
+- abra **Rastreabilidade → Protocolo de roteamento**;
+- verifique se a resposta começou com `DELEGATE <id>`;
+- tente um modelo instruct mais obediente ou uma quantização menos agressiva.
+
+## Tools, resources e memória
+
+Em **Configuração**:
+
+- envie arquivos em **Resources**;
+- habilite as tools que o chat pode solicitar;
+- aprove cada execução antes que a tool acesse o resource;
+- cadastre memória de projeto, longa ou episódica;
+- use a busca local para verificar o conteúdo recuperável.
+
+O profiling é ativado pela caixa **Profiling ativo** no compositor. Os arquivos
+JSON são gravados em `data/profiling/`.
+
+## Acesso pela rede local
+
+Defina `LAN_ACCESS=true` no `.env`, reinicie o launcher e permita TCP/4200 no
+perfil **Privado** do Firewall do Windows. Descubra o IP com `ipconfig` e acesse:
+
+```text
+http://IP-DO-PC:4200
+```
+
+Django e a API da LLM permanecem em loopback. Não encaminhe portas no roteador
+e não exponha esta configuração à internet.
+
+## Testes
+
+```powershell
+python backend\manage.py test core
+
+cd frontend
+npm run build
+cd ..
+```
+
+## Estrutura
+
+```text
+backend/             Django, API, worker, memória, tools e persistência
+frontend/            Angular e editor visual de flows
+scripts/dev.ps1      launcher local
+data/                banco auxiliar, uploads, usuários e profiling (ignorado)
+.logs/               locks e logs locais (ignorado)
+.env.example         configuração de referência
+```
+
+## Limitações atuais
+
+- autenticação CSV sem hash, indicada apenas para ambiente interno;
+- um mesmo modelo normalmente atende todos os agentes para economizar VRAM;
+- a qualidade do roteamento depende da capacidade do modelo seguir o protocolo;
+- a trilha mostra decisões operacionais e resultados intermediários, não o
+  raciocínio interno privado do modelo;
+- não há sandbox de sistema operacional para execução arbitrária de código.
